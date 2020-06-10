@@ -33,7 +33,7 @@ def image_flip(img, horizontal=True, vertical=False):
         Flipped image.
 
     Note: An image that is flipped both vertically and horizontally is equivalent 
-          to an 180 degree rotation about the center of the original image.
+          to a 180 degree rotation about the center of the original image.
     """
     if horizontal:
         img = img[:, ::-1]
@@ -49,8 +49,10 @@ def image_shift(img, pixels=0)
 
 ################################################################################
 
-def image_crop(img, x1, x2, y1, y2):
-    return img
+def image_crop(img, angle=45):
+    
+    
+    return img 
 
 ################################################################################
 ################################################################################
