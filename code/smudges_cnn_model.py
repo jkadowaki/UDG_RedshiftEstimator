@@ -1,8 +1,27 @@
 #!/usr/bin/env python
 
+################################################################################
+"""
+CONTACT: Jennifer Kadowaki (jkadowaki@email.arizona.edu)
+LAST UPDATED: 2020 SEPT 26
+
+TODO:
+[0] Aggregate more data. (!!!!)
+[1] Implement early stopping.
+[2] Increase model size since it looks like it's still underfitting the data.
+[3] Test whether custom loss function will help.
+[4] Implement transfer learning if [3] doesn't work.
+
+Recently Implemented:
+[0] Track performance metrics & training loss. (2020 SEPT 25)
+"""
+################################################################################
+
 from __future__ import print_function, division
 import argparse
+import csv
 from datetime import datetime
+import glob as g
 import matplotlib.pyplot as plt
 import numpy as np
 import os
@@ -25,6 +44,11 @@ from torchvision import transforms, utils
 import warnings
 warnings.filterwarnings("ignore")
 
+# Matplotlib Fonts
+plt.rcParams.update({ "text.usetex": True,
+                      "font.family": "sans-serif",
+                      "font.sans-serif": ["Helvetica"] })
+
 ### NOTE: Confirmed to work for these package versions:
 # NumPy 1.19.1
 # pandas 0.25.1
@@ -32,19 +56,6 @@ warnings.filterwarnings("ignore")
 # PyTorch 1.5.0, 1.6.0
 
 
-################################################################################
-"""
-CONTACT: Jennifer Kadowaki (jkadowaki@email.arizona.edu)
-LAST UPDATED: 2020 SEPT 25
-
-TODO:
-[-1] Aggregate more data. (!!!!)
-[0] Track performance metrics & training loss.
-[1] Implement early stopping.
-[2] Increase model size since it looks like it's still underfitting the data.
-[3] Test whether custom loss function will help.
-[4] Implement transfer learning if [3] doesn't work.
-"""
 ################################################################################
 
 ################################################################################
@@ -294,7 +305,10 @@ def display_batches(smudges_dataset, num_display=8,
 
 # Helper function to show a batch
 def show_batch(sample_batched, max_value=256):
-    """Show images in a batch of samples."""
+    """
+    Show images in a batch of samples.
+    """
+
     images_batch, cz_batch = sample_batched['image'], sample_batched['cz']
     batch_size = len(images_batch)
     im_size = images_batch.size(2)
@@ -307,6 +321,7 @@ def show_batch(sample_batched, max_value=256):
         plt.title('Batch from dataloader')
 
 def display_batch(dataloader, batch_size=16):
+    
     for i_batch, sample_batched in enumerate(dataloader):
         print("\n", i_batch, sample_batched['image'].size(),
               sample_batched['cz'].size())
@@ -330,6 +345,7 @@ def display_batch(dataloader, batch_size=16):
 ################################################################################
 
 class SMUDGes_CNN(nn.Module):
+    
     def __init__(self):
         super().__init__()
         self.conv1       = nn.Conv2d(3, 3, kernel_size=8, stride=2, padding=2)
@@ -391,44 +407,89 @@ class SMUDGes_CNN(nn.Module):
 
 ################################################################################
 
-def loss_batch(model, loss_func, image, cz, opt=None):
-    
-    loss = loss_func(model(image), cz)
-
-    if opt is not None:
-        loss.backward()
-        opt.step()
-        opt.zero_grad()
-        
-    return loss.item(), len(image)
-
-
+################################################################################
+#                                                                              #
+#                                 TRAINING MODEL                               #
+#                                                                              #
 ################################################################################
 
-def fit(epochs, model, loss, opt, train_dl, valid_dl):
+def fit(epochs, model, loss_func, opt, train_dl, valid_dl):
     
-    print("EPOCH\t LOSS")
+    # Tracks Model Metrics
+    metrics_dict = {}
     
+    print("\n---------------------------------------------------------")
+    print(  "EPOCH    TRAINING_LOSS   VALIDATION_LOSS    PERCENT_ERROR")
+    print(  "---------------------------------------------------------")
     for epoch in range(epochs):
         
+        # Training Metrics
+        training_loss   = 0.
+        training_images = 0
+        
+        # Switches Model to Training Mode
         model.train()
-        for batch_idx, batched_data in enumerate(train_dl):
+        
+        # Computes Gradients & Updates Model After Every Mini-Batch
+        for batched_data in train_dl:
+            
+            # Load Batched Data
             image = batched_data['image']
             cz    = batched_data['cz']
             
-            loss_batch(model, loss, image, cz, opt)
+            # Computes Loss between Model Prediction & Labels
+            loss = loss_func(model(image), cz)
+            # Removes Gradients from Previous Batch
+            opt.zero_grad()
+            # Compute Gradients
+            loss.backward()
+            # Update Model
+            opt.step()
+            
+            # Tracks Cumulative Loss Per Epoch
+            training_loss   += loss.item()
+            training_images += len(image)
 
+
+        # Validation Metrics
+        validation_loss   = 0.
+        validation_images = 0
+        percent_error     = 0.
+
+        # Switches Model to Evaluation Mode
         model.eval()
-        with torch.no_grad():
-            losses, nums = zip(*[ loss_batch( model,               \
-                                              loss,                \
-                                              batch_data['image'], \
-                                              batch_data['cz'])    \
-                                  for batch_data in valid_dl] )
         
-        val_loss = np.sum(np.multiply(losses, nums)) / np.sum(nums)
+        # Turn off Gradient Calculations (i.e., Do not update model parameters)
+        with torch.no_grad():
+            
+            # Tracks Validation Losses Across Every Mini-Batch
+            for batched_data in valid_dl:
+            
+                # Load Batched Data
+                image = batched_data['image']
+                cz    = batched_data['cz']
+            
+                # Computes Loss between Model Prediction & Labels
+                prediction = model(image)
+                loss = loss_func(prediction, cz)
+                
+                # Tracks Cumulative Loss Per Epoch
+                validation_loss   += loss.item()
+                validation_images += len(image)
+    
+                # Tracks Percent Error
+                percent_error += th.sum(100 * th.abs((prediction - cz) / cz)).item()
+    
+        # Compute Training & Evaluation Losses Per Epoch
+        train_loss_per_epoch = training_loss   / training_images
+        valid_loss_per_epoch = validation_loss / validation_images
+        percent_error       /= validation_images
+        metrics_dict[epoch]  = [train_loss_per_epoch, valid_loss_per_epoch, percent_error]
+        
+        print(f"{epoch} \t {train_loss_per_epoch:>10.2f} \t {valid_loss_per_epoch:>10.2f} \t {percent_error:>9.3f}%" )
+    print("---------------------------------------------------------\n")
 
-        print(epoch, "\t", val_loss)
+    return metrics_dict
 
 
 ################################################################################
@@ -439,19 +500,22 @@ def fit(epochs, model, loss, opt, train_dl, valid_dl):
 #                                                                              #
 ################################################################################
 
-def generate_predictions(MODEL, dataloader, verbose=True):
+def generate_predictions(MODEL, dataloader, verbose=True, num_augmentations=10):
+    
     if verbose:
         print("True\t Predicted")
+
     true = []
     pred = []
 
-    for idx in range(10):
+    for idx in range(num_augmentations):
+        
         for batch in dataloader:
-            image = batch['image']
-            cz    = batch['cz']
-
-            pred  = MODEL(image)
-            for item in zip(cz, pred):
+            image    = batch['image']
+            cz       = batch['cz']
+            estimate = MODEL(image)
+            
+            for item in zip(cz, estimate):
                 true.append(int(item[0].item()))
                 pred.append(np.round(item[1].item(),2))
                 if verbose:
@@ -475,27 +539,71 @@ def plot_true_vs_predicted(MODEL, train_dataloader, valid_dataloader,
     plt.plot([-2000,12000], [-2000,12000], c='g', linestyle='-')
     
     # Plot Training & Validation Results
-    plt.scatter(training_true, training_pred,
-                c='b', marker='.', s=15, label="Training")
-    plt.scatter(validation_true, validation_pred,
-                c='r', marker='o', s=50, label="Validation")
+    plt.scatter(train_true, train_pred, c='b', marker='.', s=15, label="Training")
+    plt.scatter(valid_true, valid_pred, c='r', marker='o', s=50, label="Validation")
     
     # Plot Formatting
-    plt.xlabel("True cz (km/s)",      fontsize=20)
-    plt.ylabel("Predicted cz (km/s)", fontsize=20)
+    plt.xlabel(r"True cz (km/s)",      fontsize=20)
+    plt.ylabel(r"Predicted cz (km/s)", fontsize=20)
     plt.xlim(-2000,12000)
     plt.ylim(-2000,12000)
     plt.legend()
     
-    plt.savefig(plot_fname)
+    plt.savefig(plot_fname, bbox_inches='tight')
 
 
 ################################################################################
 
-def pipeline():
+def plot_learning_curve(metrics_dict, plot_fname='learning_curve.pdf', save_metrics=True):
+    
+    # Load Metrics
+    epochs = list(metrics_dict.keys())
+    training_loss, validation_loss, percent_error = list(zip(*metrics_dict.values()))
+
+    # Create Figure
+    fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(10, 5))
+
+    # Plot Learning Curves
+    axes[0].plot(epochs, training_loss,   c='b', label=r"Training Loss")
+    axes[0].plot(epochs, validation_loss, c='r', label=r"Validation Loss")
+    axes[1].plot(epochs, percent_error,   c='g', label=r"Percent Error (\%)")
+
+    # Plot Formatting
+    axes[0].set_xlabel(r"Epochs")
+    axes[0].set_ylabel(r"MSE Loss")
+    axes[1].set_xlabel(r"Epochs")
+    axes[1].set_ylabel(r"Percent Error (\%)")
+    axes[0].legend()
+    axes[1].legend()
+    
+    # Save Figure
+    plt.savefig(plot_fname, bbox_inches='tight')
+
+    # Write Metrics to CSV File
+    if save_metrics:
+        csv_file = plot_fname.replace('pdf', 'csv')
+        rows     = zip(epochs, training_loss, validation_loss, percent_error)
+
+        with open(csv_file, "w") as f:
+            writer = csv.writer(f)
+            writer.writerow(("epoch", "training_loss", "validation_loss", "percent_error"))
+            for row in rows:
+                writer.writerow(row)
+
+
+################################################################################
+
+################################################################################
+#                                                                              #
+#                   MODEL PIPELINE FOR TRAINING & EVALUATION                   #
+#                                                                              #
+################################################################################
+
+def pipeline(train_model=True, load_pretrained_model=True):
+
 
     # LOAD DATA
-    ROOT_DIR            = '/Users/jkadowaki/dataset'
+    ROOT_DIR            = "/Users/jkadowaki/dataset"
     transformed_dataset = SMUDGesDataset(
                           csv_file=os.path.join(ROOT_DIR, "training.csv"),
                           root_dir=os.path.join(ROOT_DIR, "training", "zoom15"),
@@ -530,76 +638,89 @@ def pipeline():
     NUM_NODES         = 2
 
     # MODEL PARAMETERS
-    MODEL          = SMUDGes_CNN()
-    AUGMENT_FACTOR = 2 * 4 * 25
-    ITERATIONS     = 2
-    EPOCHS         = int(ITERATIONS * AUGMENT_FACTOR * DATASET_SIZE/BATCH_SIZE)
-    LEARNING_RATE  = 0.0002
-    DECAY          = 0.25
-    LOSS_FUNC      = nn.MSELoss()
-    OPTIMIZER      = optim.Adam( MODEL.parameters(), lr=LEARNING_RATE,
+    MODEL_DIRECTORY = "/Users/jkadowaki/Documents/github/UDG_RedshiftEstimator/checkpoints"
+    MODEL           = SMUDGes_CNN()
+    AUGMENT_FACTOR  = 2 * 4 * 25
+    ITERATIONS      = 2
+    EPOCHS          = 20 #int(ITERATIONS * AUGMENT_FACTOR * DATASET_SIZE/BATCH_SIZE)
+    LEARNING_RATE   = 0.0002
+    DECAY           = 0.25
+    LOSS_FUNC       = nn.MSELoss(reduction='sum')
+    OPTIMIZER       = optim.Adam( MODEL.parameters(), lr=LEARNING_RATE,
                                  betas=(0.9, 0.999), eps=1e-08,
                                  weight_decay=DECAY, amsgrad=False )
+
+    # RESULTS PARAMETERS
+    RESULTS_DIRECTORY   = "/Users/jkadowaki/Documents/github/UDG_RedshiftEstimator/results"
+    RESULTS_FILE        = os.path.join(RESULTS_DIRECTORY, "true_vs_pred.pdf")
+    LEARNING_CURVE_FILE = os.path.join(RESULTS_DIRECTORY, "learning_curve.pdf")
+
 
     # SPLIT DATA INTO TRAINING / VALIDATION
     train_size = int(TRAINING_FRACTION * len(transformed_dataset))
     valid_size = len(transformed_dataset) - train_size
-    
+        
     train_dataset, valid_dataset = torch.utils.data.random_split(
                                    transformed_dataset, [train_size, valid_size])
-
+            
     train_dataloader  = DataLoader( train_dataset, batch_size=BATCH_SIZE,
-                                    shuffle=True, num_workers=NUM_NODES )
+                                    shuffle=True,  num_workers=NUM_NODES )
     valid_dataloader  = DataLoader( valid_dataset, batch_size=BATCH_SIZE,
-                                    shuffle=True, num_workers=NUM_NODES )
+                                    shuffle=True,  num_workers=NUM_NODES )
 
-    # TRAIN & EVALUATION
-    fit(EPOCHS, MODEL, LOSS_FUNC, OPTIMIZER, train_dataloader, valid_dataloader)
 
-    # SAVE MODEL
-    datetime_str = datetime.now().strftime("%Y%m%d%H%M%S")
-    MODEL_PATH   = 'smudges_redshift_{0}.pt'.format(datetime_str)
+    # LOAD PRETRAINED MODEL TO CONTINUE TRAINING OR
+    if load_pretrained_model:
+        
+        LATEST_CHECKPOINT = max(g.glob(os.path.join(MODEL_DIRECTORY,'*')))
+        checkpoint_dict   = torch.load(LATEST_CHECKPOINT)
+        
+        EPOCHS    = checkpoint_dict['epoch']
+        LOSS_FUNC = checkpoint_dict['loss']
+        MODEL.load_state_dict(checkpoint_dict['model_state_dict'])
+        OPTIMIZER.load_state_dict(checkpoint_dict['optimizer_state_dict'])
 
-    torch.save(MODEL.state_dict(), MODEL_PATH)
-    torch.save({
-                'epoch':                EPOCHS,
-                'model_state_dict':     MODEL.state_dict(),
-                'optimizer_state_dict': OPTIMIZER.state_dict(),
-                'loss': LOSS_FUNC
-                }, MODEL_PATH)
-                
+
+    # TRAIN MODEL
+    if train_model:
+
+        # TRAIN & EVALUATION
+        MODEL.train()
+        metrics_dict = fit(EPOCHS, MODEL, LOSS_FUNC, OPTIMIZER,
+                           train_dataloader, valid_dataloader)
+        plot_learning_curve(metrics_dict, plot_fname=LEARNING_CURVE_FILE)
+
+        # SAVE MODEL
+        datetime_str = datetime.now().strftime("%Y%m%d%H%M%S")
+        MODEL_PATH   = os.path.join( MODEL_DIRECTORY,
+                                     'smudges_redshift_{0}.pt'.format(datetime_str) )
+
+        torch.save({ 'epoch':                EPOCHS,
+                     'model_state_dict':     MODEL.state_dict(),
+                     'optimizer_state_dict': OPTIMIZER.state_dict(),
+                     'loss':                 LOSS_FUNC
+                    }, MODEL_PATH)
+
+
     # GENERATE PREDICTIONS
+    MODEL.eval()
     plot_true_vs_predicted(MODEL, train_dataloader, valid_dataloader,
-                           plot_fname="true_vs_pred.pdf", verbose=True)
+                           plot_fname=RESULTS_FILE, verbose=True)
 
+
+################################################################################
 
 ################################################################################
 
 if __name__ == "__main__":
-    pipeline()
+    pipeline(train_model=True, load_pretrained_model=False)
 
 
 ################################################################################
 
-# This call sets the network to 'evaluation' mode, which effects
-# batchnorm layers slightly. In training mode, the network can't
-# operate on a single example at a time, it needs batches to be
-# well defined.
 """
-net.eval()
-with torch.no_grad(): # `torch.no_grad` explained in automatic differentiation
-    all_outs = net(test_features)
-test_prediction = all_outs.argmax(dim=1)
-
-accuracy = sklearn.metrics.accuracy_score(test_labels,test_prediction)
-print("CONVOLUTIONAL NETWORK")
-print("Overall accuracy:",accuracy*100,"%")
-print("Classification Report:")
 print(sklearn.metrics.classification_report(test_labels,test_prediction,digits=4))
-
 print("Parameter count:", sum(p.nelement() for p in net.parameters()))
-for name,param in net.named_parameters():
-    print(list(param.shape),name)
 """
 
 ################################################################################
