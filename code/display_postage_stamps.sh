@@ -12,13 +12,13 @@ PLOT_DIR=$PROJECT_DIR/plots
 $CODE/display_postage_stamps.py  $DATA/kadowaki2019.tsv        \
                                  $IMG_DIR                      \
                                  $PLOT_DIR/udgs_sortby-RA.pdf  \
-								 --udgs                        \
-								 --table all                   \
-								 --environment all             \
-								 --layer dr8                   \
-								 --sortby ra                   \
-                                 --annotations
-								 --verbose
+                                 --udgs                        \
+                                 --table all                   \
+                                 --environment all             \
+                                 --layer dr8                   \
+                                 --sortby ra                   \
+                                 --annotations                 \
+                                 --verbose
 
 
 # Redshift Estimation Model Figure
