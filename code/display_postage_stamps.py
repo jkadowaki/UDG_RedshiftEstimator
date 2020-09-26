@@ -83,8 +83,11 @@ def parse_args(verbose=True):
                              "'MUg0', 'Mg', 'g-r', 'Re',  'b/a', 'n'}")
 
     # Flag to select UDGs/candidates
-    parser.add_argument('--udgs',       dest='udgs_only', action='store_true')
-    parser.add_argument('--candidates', dest='udgs_only', action='store_false')
+    parser.add_argument('--udgs',          dest='udgs_only',   action='store_true')
+    parser.add_argument('--candidates',    dest='udgs_only',   action='store_false')
+    parser.add_argument('--annotations',   dest='annotations', action='store_true')
+    parser.add_argument('--noannotations', dest='annotations', action='store_false')
+    
     
     # Flag to run script verbosely/silently
     parser.add_argument('--verbose', dest='verbose', action='store_true')
@@ -138,7 +141,7 @@ def get_data(data_file, table=[2,3,4], udgs_only=True, environment=['all'],
 ################################################################################
 
 def make_figure(df, image_dir, figure_name, layer='dr8', verbose=True,
-                num_cols=5, img_size=5):
+                num_cols=5, img_size=5, annotations=True):
 
     # Annotations
     labels = {"NAME": ("",              ""),
@@ -177,15 +180,17 @@ def make_figure(df, image_dir, figure_name, layer='dr8', verbose=True,
         imgplot = subfig.imshow(img, interpolation='none')
         subfig.axis("off")
 
-        # Add Figure Annotations
-        subfig.text(0.05, 0.90, generate_label(obj,"NAME"), c='w', transform=subfig.transAxes, fontsize=24, weight='bold')
-        subfig.text(0.05, 0.83, generate_label(obj,"cz"),   c='w', transform=subfig.transAxes)
-        subfig.text(0.05, 0.29, generate_label(obj,"n"),    c='w', transform=subfig.transAxes)
-        subfig.text(0.05, 0.21, generate_label(obj,"b/a"),  c='w', transform=subfig.transAxes)
-        subfig.text(0.05, 0.12, generate_label(obj,"Re"),   c='w', transform=subfig.transAxes)
-        subfig.text(0.05, 0.05, generate_label(obj,"MUg0"), c='w', transform=subfig.transAxes)
+        if annotations:
+            # Add Figure Annotations
+            subfig.text(0.05, 0.90, generate_label(obj,"NAME"), c='w', transform=subfig.transAxes, fontsize=24, weight='bold')
+            subfig.text(0.05, 0.83, generate_label(obj,"cz"),   c='w', transform=subfig.transAxes)
+            subfig.text(0.05, 0.29, generate_label(obj,"n"),    c='w', transform=subfig.transAxes)
+            subfig.text(0.05, 0.21, generate_label(obj,"b/a"),  c='w', transform=subfig.transAxes)
+            subfig.text(0.05, 0.12, generate_label(obj,"Re"),   c='w', transform=subfig.transAxes)
+            subfig.text(0.05, 0.05, generate_label(obj,"MUg0"), c='w', transform=subfig.transAxes)
     
-    plt.subplots_adjust(wspace=0.03, hspace=0.03)
+    plt.subplots_adjust(wspace=0.03 if annotations else 0.005,
+                        hspace=0.03 if annotations else 0.005)
     plt.savefig(figure_name, bbox_inches='tight')
 
 ################################################################################
@@ -201,6 +206,7 @@ if __name__ == "__main__":
                           $IMAGE_DIR                \
                           $DATA/../plot/sort_n.pdf  \
                           --udgs                    \
+                          --annotations             \
                           --table       all         \
                           --environment all         \
                           --layer       dr8         \
@@ -229,7 +235,8 @@ if __name__ == "__main__":
                        sort_param=args.sortby, verbose=args.verbose)
     
     make_figure(df_data, args.image_dir, args.figure_name, layer=args.layer[0],
-                num_cols=6, verbose=args.verbose)
+                num_cols=6 if args.annotations else 9,
+                annotations=args.annotations, verbose=args.verbose)
 
 
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-import __future__ import print_function, division
+from __future__ import print_function, division
 import argparse
 from datetime import datetime
 import matplotlib.pyplot as plt
@@ -54,16 +54,17 @@ TODO:
 ################################################################################
 
 class SMUDGesDataset(Dataset):
-    """Custom map-style dataset class for the SMUDGes dataset.
+    """
+    Custom map-style dataset class for the SMUDGes dataset.
     
     SMUDGesDataset inherits torch.utils.data.Dataset and overrides
     the __len__ and __getitem__ methods.
     """
     
-    def __init__(self, csv_file, root_dir, transform=None
+    def __init__(self, csv_file, root_dir, transform=None,
                        zoom=15, image_type='dr8_data'):
         """
-        Reads csv_file 
+        Reads csv_file
 
         Args:
             csv_file (string): Path to the csv file with annotations.
@@ -170,19 +171,19 @@ class RandomShift(object):
     def __call__(self, udg):
         
         def shift_image(image, shift, vertical=True):
-        """
-          Shifts the image by `shift` pixels in the specified direction.
-          Direction is specified by the sign of `shift` and the `vertical` flag.
+            """
+            Shifts the image by `shift` pixels in the specified direction.
+            Direction is specified by the sign of `shift` and the `vertical` flag.
 
-          Args:
-              image (np.ndarray): 2D or 3D Image
-              shift (int): Number of pixels to shift the image.
-                           Negative value shifts the image up or to the left
-                               depending on whether `vertical` is True.
-                           Positive values shifts image down or to the right.
-              vertical (bool): Flag to indicate whether to shift an image
-                               vertically or horizontally.
-          """
+            Args:
+                image (np.ndarray): 2D or 3D Image
+                shift (int): Number of pixels to shift the image.
+                             Negative value shifts the image up or to the left
+                                 depending on whether `vertical` is True.
+                             Positive values shifts image down or to the right.
+                vertical (bool): Flag to indicate whether to shift an image
+                                 vertically or horizontally.
+            """
             new_image = image.copy() if vertical else \
                         image.copy().transpose((1,0,2)) \
                         if len(image.shape)==3 else image.copy().T
@@ -305,7 +306,7 @@ def show_batch(sample_batched, max_value=256):
     for i in range(batch_size):
         plt.title('Batch from dataloader')
 
-def display_batch(dataloader, batch_size=BATCH_SIZE):
+def display_batch(dataloader, batch_size=16):
     for i_batch, sample_batched in enumerate(dataloader):
         print("\n", i_batch, sample_batched['image'].size(),
               sample_batched['cz'].size())
