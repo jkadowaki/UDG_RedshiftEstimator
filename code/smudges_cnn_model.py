@@ -7,13 +7,13 @@ LAST UPDATED: 2020 SEPT 26
 
 TODO:
 [0] Aggregate more data. (!!!!)
-[1] Implement early stopping.
-[2] Increase model size since it looks like it's still underfitting the data.
-[3] Test whether custom loss function will help.
-[4] Implement transfer learning if [3] doesn't work.
+[1] Increase model size since it looks like it's still underfitting the data.
+[2] Test whether custom loss function will help.
+[3] Implement transfer learning if [3] doesn't work.
 
 Recently Implemented:
 [0] Track performance metrics & training loss. (2020 SEPT 25)
+[1] Implement early stopping. (2020 SEPT 26)
 """
 ################################################################################
 
@@ -378,7 +378,7 @@ class SMUDGes_CNN(nn.Module):
         
         image = self.conv2(image)
         image = self.leaky_relu2(image)
-        image = self.batch_norm2(image)
+        #image = self.batch_norm2(image)
         #print("Step 2", image.shape)        
         
         image = F.max_pool2d(image, 4)
@@ -413,19 +413,27 @@ class SMUDGes_CNN(nn.Module):
 #                                                                              #
 ################################################################################
 
-def fit(epochs, model, loss_func, opt, train_dl, valid_dl):
+def fit(epochs, model, loss_func, opt, patience, train_dl, valid_dl,
+        model_directory='checkpoints'):
     
     # Tracks Model Metrics
     metrics_dict = {}
     
-    print("\n---------------------------------------------------------")
-    print(  "EPOCH    TRAINING_LOSS   VALIDATION_LOSS    PERCENT_ERROR")
-    print(  "---------------------------------------------------------")
+    # Early Stopping Metrics
+    last_val_model     = None
+    min_val_loss   = 99999999999999999999999 # Initialize to Large Number
+    no_improvement = 0
+    
+    
+    print("\n---------------------------------------------------------------------------")
+    print(  "EPOCH    TRAINING_LOSS   VALIDATION_LOSS   TRAINING_ERROR  VALIDATION_ERROR")
+    print(  "---------------------------------------------------------------------------")
     for epoch in range(epochs):
         
         # Training Metrics
         training_loss   = 0.
         training_images = 0
+        training_error  = 0.
         
         # Switches Model to Training Mode
         model.train()
@@ -438,7 +446,8 @@ def fit(epochs, model, loss_func, opt, train_dl, valid_dl):
             cz    = batched_data['cz']
             
             # Computes Loss between Model Prediction & Labels
-            loss = loss_func(model(image), cz)
+            prediction = model(image)
+            loss = loss_func(prediction, cz)
             # Removes Gradients from Previous Batch
             opt.zero_grad()
             # Compute Gradients
@@ -450,11 +459,15 @@ def fit(epochs, model, loss_func, opt, train_dl, valid_dl):
             training_loss   += loss.item()
             training_images += len(image)
 
+            # Tracks Training Percent Error
+            training_error  += th.sum(100 * th.abs((prediction - cz) / cz)).item()
+    
+
 
         # Validation Metrics
         validation_loss   = 0.
         validation_images = 0
-        percent_error     = 0.
+        validation_error  = 0.
 
         # Switches Model to Evaluation Mode
         model.eval()
@@ -477,17 +490,50 @@ def fit(epochs, model, loss_func, opt, train_dl, valid_dl):
                 validation_loss   += loss.item()
                 validation_images += len(image)
     
-                # Tracks Percent Error
-                percent_error += th.sum(100 * th.abs((prediction - cz) / cz)).item()
+                # Tracks Validation Percent Error
+                validation_error  += th.sum(100 * th.abs((prediction - cz) / cz)).item()
+    
     
         # Compute Training & Evaluation Losses Per Epoch
         train_loss_per_epoch = training_loss   / training_images
         valid_loss_per_epoch = validation_loss / validation_images
-        percent_error       /= validation_images
-        metrics_dict[epoch]  = [train_loss_per_epoch, valid_loss_per_epoch, percent_error]
+        training_error      /= training_images
+        validation_error    /= validation_images
+        metrics_dict[epoch]  = [train_loss_per_epoch, valid_loss_per_epoch, training_error, validation_error]
         
-        print(f"{epoch} \t {train_loss_per_epoch:>10.2f} \t {valid_loss_per_epoch:>10.2f} \t {percent_error:>9.3f}%" )
-    print("---------------------------------------------------------\n")
+        
+        # Early Stopping
+        if valid_loss_per_epoch < min_val_loss:
+            
+            # Resets Counter & Minimum Validation Loss Observed
+            min_val_loss   = valid_loss_per_epoch
+            no_improvement = 0
+            try:
+                os.remove(last_val_model)
+            except:
+                pass
+
+            # SAVE MODEL
+            datetime_str = datetime.now().strftime("%Y%m%d%H%M%S")
+            MODEL_PATH   = os.path.join( model_directory,
+                                        'smudges_redshift_{0}.pt'.format(datetime_str) )
+            torch.save({ 'epoch':                epoch,
+                         'model_state_dict':     model.state_dict(),
+                         'optimizer_state_dict': opt.state_dict(),
+                         'loss':                 loss
+                       }, MODEL_PATH)
+            last_val_model  = MODEL_PATH
+        else:
+            no_improvement += 1
+        
+        print(f"{epoch} \t {train_loss_per_epoch:>10.2f} \t {valid_loss_per_epoch:>10.2f} \t {training_error:>9.3f}% \t {validation_error:>9.3f}%" )
+
+        # Stops Training if Number of Epochs without Validation Loss Improvement > Patience
+        if no_improvement >= patience:
+            print(f"Training Ended Early Due to No Performance Gains Since Epoch {epoch-patience}.")
+            break
+    
+    print("---------------------------------------------------------------------------\n")
 
     return metrics_dict
 
@@ -543,8 +589,8 @@ def plot_true_vs_predicted(MODEL, train_dataloader, valid_dataloader,
     plt.scatter(valid_true, valid_pred, c='r', marker='o', s=50, label="Validation")
     
     # Plot Formatting
-    plt.xlabel(r"True cz (km/s)",      fontsize=20)
-    plt.ylabel(r"Predicted cz (km/s)", fontsize=20)
+    plt.xlabel(r"True cz (km/s)")
+    plt.ylabel(r"Predicted cz (km/s)")
     plt.xlim(-2000,12000)
     plt.ylim(-2000,12000)
     plt.legend()
@@ -558,15 +604,27 @@ def plot_learning_curve(metrics_dict, plot_fname='learning_curve.pdf', save_metr
     
     # Load Metrics
     epochs = list(metrics_dict.keys())
-    training_loss, validation_loss, percent_error = list(zip(*metrics_dict.values()))
+    training_loss, validation_loss, training_error, validation_error = list(zip(*metrics_dict.values()))
 
     # Create Figure
-    fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(10, 5))
+    fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(11, 5))
 
     # Plot Learning Curves
-    axes[0].plot(epochs, training_loss,   c='b', label=r"Training Loss")
-    axes[0].plot(epochs, validation_loss, c='r', label=r"Validation Loss")
-    axes[1].plot(epochs, percent_error,   c='g', label=r"Percent Error (\%)")
+    axes[0].plot(epochs, training_loss,    c='b', label=r"Training")
+    axes[0].plot(epochs, validation_loss,  c='r', label=r"Validation")
+    axes[1].plot(epochs, training_error,   c='b', label=r"Training")
+    axes[1].plot(epochs, validation_error, c='r', label=r"Validation")
+    
+    # Plot Early Stopping Epoch
+    vl_epoch   = [e for e,vl in zip(epochs, validation_loss)  if vl==min(validation_loss)][0]
+    ve_epoch   = [e for e,ve in zip(epochs, validation_error) if ve==min(validation_error)][0]
+    ymin, ymax = axes[0].get_ylim()
+    axes[0].plot([vl_epoch, vl_epoch], [ymin, ymax], c='g', linestyle='--', label=r'Val Loss  Epoch')
+    axes[0].plot([ve_epoch, ve_epoch], [ymin, ymax], c='y', linestyle='-.', label=r'Val Error Epoch')
+    ymin, ymax = axes[1].get_ylim()
+    axes[1].plot([vl_epoch, vl_epoch], [ymin, ymax], c='g', linestyle='--', label=r'Val Loss  Epoch')
+    axes[1].plot([ve_epoch, ve_epoch], [ymin, ymax], c='y', linestyle='-.', label=r'Val Error Epoch')
+
 
     # Plot Formatting
     axes[0].set_xlabel(r"Epochs")
@@ -582,11 +640,12 @@ def plot_learning_curve(metrics_dict, plot_fname='learning_curve.pdf', save_metr
     # Write Metrics to CSV File
     if save_metrics:
         csv_file = plot_fname.replace('pdf', 'csv')
-        rows     = zip(epochs, training_loss, validation_loss, percent_error)
+        rows     = zip( epochs, training_loss,  validation_loss,
+                                training_error, validation_error )
 
         with open(csv_file, "w") as f:
             writer = csv.writer(f)
-            writer.writerow(("epoch", "training_loss", "validation_loss", "percent_error"))
+            writer.writerow(("epoch", "training_loss", "validation_loss", "training_error", "validation_error"))
             for row in rows:
                 writer.writerow(row)
 
@@ -642,13 +701,15 @@ def pipeline(train_model=True, load_pretrained_model=True):
     MODEL           = SMUDGes_CNN()
     AUGMENT_FACTOR  = 2 * 4 * 25
     ITERATIONS      = 2
-    EPOCHS          = 20 #int(ITERATIONS * AUGMENT_FACTOR * DATASET_SIZE/BATCH_SIZE)
+    EPOCHS          = int(ITERATIONS * AUGMENT_FACTOR * DATASET_SIZE/BATCH_SIZE)
     LEARNING_RATE   = 0.0002
     DECAY           = 0.25
     LOSS_FUNC       = nn.MSELoss(reduction='sum')
     OPTIMIZER       = optim.Adam( MODEL.parameters(), lr=LEARNING_RATE,
                                  betas=(0.9, 0.999), eps=1e-08,
                                  weight_decay=DECAY, amsgrad=False )
+    PATIENCE        = 15
+
 
     # RESULTS PARAMETERS
     RESULTS_DIRECTORY   = "/Users/jkadowaki/Documents/github/UDG_RedshiftEstimator/results"
@@ -686,20 +747,10 @@ def pipeline(train_model=True, load_pretrained_model=True):
 
         # TRAIN & EVALUATION
         MODEL.train()
-        metrics_dict = fit(EPOCHS, MODEL, LOSS_FUNC, OPTIMIZER,
-                           train_dataloader, valid_dataloader)
+        metrics_dict = fit(EPOCHS, MODEL, LOSS_FUNC, OPTIMIZER, PATIENCE,
+                           train_dataloader, valid_dataloader, MODEL_DIRECTORY)
         plot_learning_curve(metrics_dict, plot_fname=LEARNING_CURVE_FILE)
 
-        # SAVE MODEL
-        datetime_str = datetime.now().strftime("%Y%m%d%H%M%S")
-        MODEL_PATH   = os.path.join( MODEL_DIRECTORY,
-                                     'smudges_redshift_{0}.pt'.format(datetime_str) )
-
-        torch.save({ 'epoch':                EPOCHS,
-                     'model_state_dict':     MODEL.state_dict(),
-                     'optimizer_state_dict': OPTIMIZER.state_dict(),
-                     'loss':                 LOSS_FUNC
-                    }, MODEL_PATH)
 
 
     # GENERATE PREDICTIONS
@@ -717,10 +768,8 @@ if __name__ == "__main__":
 
 
 ################################################################################
-
 """
-print(sklearn.metrics.classification_report(test_labels,test_prediction,digits=4))
+https://scikit-learn.org/stable/modules/model_evaluation.html
 print("Parameter count:", sum(p.nelement() for p in net.parameters()))
 """
-
 ################################################################################
