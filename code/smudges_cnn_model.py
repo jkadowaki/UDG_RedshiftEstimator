@@ -19,7 +19,7 @@ Recently Implemented:
 ################################################################################
 
 from __future__ import print_function, division
-import argparse
+#import argparse
 import csv
 from datetime import datetime
 import glob as g
@@ -28,9 +28,9 @@ import numpy as np
 import os
 import pandas as pd
 import random
-import skimage
-from skimage import io, transform, metrics
-import sklearn.metrics
+#import skimage
+#from skimage import io, transform, metrics
+#import sklearn.metrics
 
 import torch as th
 import torch.nn as nn
@@ -38,7 +38,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 import torch.utils.data
 from torch.utils.data import Dataset, DataLoader
-from torch.utils.tensorboard import SummaryWriter
+#from torch.utils.tensorboard import SummaryWriter
 from torchvision import transforms, utils
 
 # Ignore warnings
@@ -90,10 +90,10 @@ class SMUDGesDataset(Dataset):
                               "m", "model" --> use model image.
                               anything else --> use Legacy Survey DR8 image.
         """
-        self.smudges_cz = pd.read_csv(csv_file)
-        self.root_dir = root_dir
-        self.transform = transform
-        self.zoom = zoom
+        self.smudges_cz  = pd.read_csv(csv_file)
+        self.root_dir   = root_dir
+        self.transform  = transform
+        self.zoom       = zoom
         self.image_type = image_type
     
     
@@ -113,7 +113,7 @@ class SMUDGesDataset(Dataset):
         residual = f"_dr8-resid_zoom{self.zoom}.jpeg"
         model    = f"_dr8-model_zoom{self.zoom}.jpeg"
         dr8_data = f"_dr8_zoom{self.zoom}.jpeg"
-        suffix   = residual  if self.image_type in ["r", "resid", "residual"] \
+        suffix   = residual   if self.image_type in ["r", "resid", "residual"] \
                    else model if self.image_type in ["m", "model"] \
                    else dr8_data
 
@@ -123,8 +123,9 @@ class SMUDGesDataset(Dataset):
         image    = io.imread(img_name)
         
         # Retrieves the redshift of object at index idx
-        cz  = self.smudges_cz.loc[self.smudges_cz.index[idx],"cz"]
-        udg = {'image': image.astype(np.float32), 'cz': cz.astype(np.float32)}
+        cz   = self.smudges_cz.loc[self.smudges_cz.index[idx],"cz"]
+        udg = { 'image': image.astype(np.float32),
+                'z':     cz.astype(np.float32) / 299792.458 }
         
         if False:
             print("NAME: ", obj_name)
@@ -147,12 +148,12 @@ class Random90Rotation:
     """Randomly rotates image by angles of 90 degree increments."""
 
     def __call__(self, udg):
-        image, cz     = udg['image'], udg['cz']
+        image, z     = udg['image'], udg['z']
         num_rotations = np.random.randint(4)
         
         image = np.rot90(image, k=num_rotations)
         
-        return {'image': image, 'cz': cz}
+        return {'image': image, 'z': z}
 
 
 ################################################################################
@@ -161,10 +162,10 @@ class RandomFlip:
     """Randomly rotates image by angles of 90 degree increments."""
 
     def __call__(self, udg):
-        image, cz = udg['image'], udg['cz']
-        image     = image if random.getrandbits(1) else np.fliplr(image)
+        image, z = udg['image'], udg['z']
+        image    = image if random.getrandbits(1) else np.fliplr(image)
         
-        return {'image': image, 'cz': cz}
+        return {'image': image, 'z': z}
 
 
 ################################################################################
@@ -219,11 +220,11 @@ class RandomShift(object):
                                               self.shift_pix+1)
         
         # Computes Image Shift
-        image, cz = udg['image'], udg['cz']
+        image, z = udg['image'], udg['z']
         image     = shift_image(image, vertical_shift)
         image     = shift_image(image, horizontal_shift, vertical=False)
 
-        return {'image': image, 'cz': cz}
+        return {'image': image, 'z': z}
 
 
 ################################################################################
@@ -232,7 +233,7 @@ class ToTensor(object):
     """Convert ndarrays in sample to Tensors."""
 
     def __call__(self, udg):
-        image, cz = udg['image'], udg['cz']
+        image, z = udg['image'], udg['z']
 
         # swap color axis because
         # numpy image: H x W x C
@@ -241,7 +242,7 @@ class ToTensor(object):
         new_image = image.copy().transpose((2, 0, 1))
         
         return { 'image': torch.from_numpy(new_image),
-                  'cz': torch.Tensor([[cz]]) }
+                  'z': torch.Tensor([[z]]) }
 
 
 ################################################################################
@@ -266,7 +267,7 @@ def display_smudges(smudges_dataset, max_display=8,
     for i in range(num_display):
         udg = smudges_dataset[i]
         
-        print(f"{i}  \t{udg['image'].shape} \t{udg['cz']}")
+        print(f"{i}  \t{udg['image'].shape} \t{udg['z']}")
         
         axes[i].axis('off')
         axes[i].imshow(udg['image']/256)
@@ -290,7 +291,7 @@ def display_batches(smudges_dataset, num_display=8,
         original_udg    = smudges_dataset[i]
         transformed_udg = visual_dataset[i]
         
-        print(f"{i}   \t{original_udg['image'].shape} \t{transformed_udg['image'].shape} \t{original_udg['cz']}")
+        print(f"{i}   \t{original_udg['image'].shape} \t{transformed_udg['image'].shape} \t{original_udg['z']}")
         
         axes[0,i].set_ylabel('UDG #{0}'.format(i))
         axes[0,i].axis('off')
@@ -310,7 +311,7 @@ def show_batch(sample_batched, max_value=256):
     Show images in a batch of samples.
     """
 
-    images_batch, cz_batch = sample_batched['image'], sample_batched['cz']
+    images_batch, z_batch = sample_batched['image'], sample_batched['z']
     batch_size = len(images_batch)
     im_size = images_batch.size(2)
     grid_border_size = 2
@@ -325,7 +326,7 @@ def display_batch(dataloader, batch_size=16):
     
     for i_batch, sample_batched in enumerate(dataloader):
         print("\n", i_batch, sample_batched['image'].size(),
-              sample_batched['cz'].size())
+              sample_batched['z'].size())
         
         plt.figure()
         show_batch(sample_batched)
@@ -421,7 +422,7 @@ def fit(epochs, model, loss_func, opt, patience, train_dl, valid_dl,
     metrics_dict = {}
     
     # Early Stopping Metrics
-    last_val _model     = None
+    last_val_model = None
     min_val_loss   = 99999999999999999999999 # Initialize to Large Number
     no_improvement = 0
     
@@ -444,13 +445,13 @@ def fit(epochs, model, loss_func, opt, patience, train_dl, valid_dl,
             
             # Load Batched Data
             image = batched_data['image']
-            cz    = batched_data['cz']
+            z     = batched_data['z']
             
             # Computes Total Loss between Model Prediction & Labels
             # Note: This is total loss bc we define it as the sum (i.e., not the
             #       default mean) with parameter reduction='sum' in LOSS_FUNC.
             prediction = model(image)
-            loss = loss_func(prediction, cz)
+            loss = loss_func(prediction, z)
             # Removes Gradients from Previous Batch
             opt.zero_grad()
             # Compute Gradients
@@ -463,7 +464,7 @@ def fit(epochs, model, loss_func, opt, patience, train_dl, valid_dl,
             training_images += len(image)
 
             # Tracks Cumulative Training Percent Error
-            training_error  += th.sum(100 * th.abs((prediction - cz) / cz)).item()
+            training_error  += th.sum(100 * th.abs((prediction - z) / z)).item()
     
 
 
@@ -483,18 +484,18 @@ def fit(epochs, model, loss_func, opt, patience, train_dl, valid_dl,
             
                 # Load Batched Data
                 image = batched_data['image']
-                cz    = batched_data['cz']
+                z     = batched_data['z']
             
                 # Computes Total Loss between Model Prediction & Labels
                 prediction = model(image)
-                loss = loss_func(prediction, cz)
+                loss       = loss_func(prediction, z)
                 
                 # Tracks Cumulative Loss Per Epoch
                 validation_loss   += loss.item()
                 validation_images += len(image)
     
                 # Tracks Cumulative Validation Percent Error
-                validation_error  += th.sum(100 * th.abs((prediction - cz) / cz)).item()
+                validation_error  += th.sum(100 * th.abs((prediction - z) / z)).item()
     
     
         # Compute Training & Evaluation Losses Per Epoch
@@ -561,10 +562,10 @@ def generate_predictions(MODEL, dataloader, verbose=True, num_augmentations=10):
         
         for batch in dataloader:
             image    = batch['image']
-            cz       = batch['cz']
+            z        = batch['z']
             estimate = MODEL(image)
             
-            for item in zip(cz, estimate):
+            for item in zip(z, estimate):
                 true.append(int(item[0].item()))
                 pred.append(np.round(item[1].item(),2))
                 if verbose:
@@ -586,29 +587,41 @@ def plot_true_vs_predicted(MODEL, train_dataloader, valid_dataloader,
     plt.figure(figsize=(10,10))
     
     # Plot 1:1 Line
-    plt.plot([-2000,12000], [-2000,12000], c='g', linestyle='-')
+    plt.plot([-0.01,0.045], [-0.01,0.045], c='g', linestyle='-')
     
     # Plot Training & Validation Results
     plt.scatter(train_true, train_pred, c='b', marker='.', s=15, label="Training")
     plt.scatter(valid_true, valid_pred, c='r', marker='o', s=50, label="Validation")
     
     # Plot Formatting
-    plt.xlabel(r"True cz (km/s)")
-    plt.ylabel(r"Predicted cz (km/s)")
-    plt.xlim(-2000,12000)
-    plt.ylim(-2000,12000)
+    plt.xlabel(r"True z (km/s)")
+    plt.ylabel(r"Predicted z (km/s)")
+    plt.xlim(-0.01,0.045)
+    plt.ylim(-0.01,0.045)
     plt.legend()
     
     plt.savefig(plot_fname, bbox_inches='tight')
 
     if save_predictions:
-
+    
+        def z_to_cz(z_list):
+            return list(299792.458 * np.array(z_list))
+        
+        directory     = os.path.dirname(plot_fname)
+        train_results = os.path.join(directory,  "train_results.csv")
+        valid_results = os.path.join(directory,  "valid_results.csv")
+        train_rows    = zip(z_to_cz(train_true), z_to_cz(train_pred))
+        valid_rows    = zip(z_to_cz(valid_true), z_to_cz(valid_pred))
+        header        = ("true_cz", "predicted_cz")
+        write_to_file(train_results, train_rows, header)
+        write_to_file(valid_results, valid_rows, header)
 
 
 ################################################################################
 
-def plot_learning_curve(metrics_dict, plot_fname='learning_curve.pdf', save_metrics=True):
-    
+def plot_learning_curve(metrics_dict, plot_fname='learning_curve.pdf',
+                        save_metrics=True):
+
     # Load Metrics
     epochs = list(metrics_dict.keys())
     training_loss, validation_loss, training_error, validation_error = list(zip(*metrics_dict.values()))
