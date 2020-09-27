@@ -6,6 +6,7 @@ CONTACT: Jennifer Kadowaki (jkadowaki@email.arizona.edu)
 LAST UPDATED: 2020 SEPT 26
 
 TODO:
+[-1] Convert values from recessional velocity (due to Hubble flow) to redshifts.
 [0] Aggregate more data. (!!!!)
 [1] Increase model size since it looks like it's still underfitting the data.
 [2] Test whether custom loss function will help.
@@ -420,7 +421,7 @@ def fit(epochs, model, loss_func, opt, patience, train_dl, valid_dl,
     metrics_dict = {}
     
     # Early Stopping Metrics
-    last_val_model     = None
+    last_val _model     = None
     min_val_loss   = 99999999999999999999999 # Initialize to Large Number
     no_improvement = 0
     
@@ -445,7 +446,9 @@ def fit(epochs, model, loss_func, opt, patience, train_dl, valid_dl,
             image = batched_data['image']
             cz    = batched_data['cz']
             
-            # Computes Loss between Model Prediction & Labels
+            # Computes Total Loss between Model Prediction & Labels
+            # Note: This is total loss bc we define it as the sum (i.e., not the
+            #       default mean) with parameter reduction='sum' in LOSS_FUNC.
             prediction = model(image)
             loss = loss_func(prediction, cz)
             # Removes Gradients from Previous Batch
@@ -459,7 +462,7 @@ def fit(epochs, model, loss_func, opt, patience, train_dl, valid_dl,
             training_loss   += loss.item()
             training_images += len(image)
 
-            # Tracks Training Percent Error
+            # Tracks Cumulative Training Percent Error
             training_error  += th.sum(100 * th.abs((prediction - cz) / cz)).item()
     
 
@@ -482,7 +485,7 @@ def fit(epochs, model, loss_func, opt, patience, train_dl, valid_dl,
                 image = batched_data['image']
                 cz    = batched_data['cz']
             
-                # Computes Loss between Model Prediction & Labels
+                # Computes Total Loss between Model Prediction & Labels
                 prediction = model(image)
                 loss = loss_func(prediction, cz)
                 
@@ -490,7 +493,7 @@ def fit(epochs, model, loss_func, opt, patience, train_dl, valid_dl,
                 validation_loss   += loss.item()
                 validation_images += len(image)
     
-                # Tracks Validation Percent Error
+                # Tracks Cumulative Validation Percent Error
                 validation_error  += th.sum(100 * th.abs((prediction - cz) / cz)).item()
     
     
@@ -573,7 +576,8 @@ def generate_predictions(MODEL, dataloader, verbose=True, num_augmentations=10):
 ################################################################################
 
 def plot_true_vs_predicted(MODEL, train_dataloader, valid_dataloader,
-                           plot_fname="true_vs_pred.pdf", verbose=True):
+                           plot_fname="true_vs_pred.pdf", verbose=True,
+                           save_predictions=True):
 
     train_true, train_pred = generate_predictions(MODEL, train_dataloader, verbose=verbose)
     valid_true, valid_pred = generate_predictions(MODEL, valid_dataloader, verbose=verbose)
@@ -596,6 +600,9 @@ def plot_true_vs_predicted(MODEL, train_dataloader, valid_dataloader,
     plt.legend()
     
     plt.savefig(plot_fname, bbox_inches='tight')
+
+    if save_predictions:
+
 
 
 ################################################################################
@@ -639,15 +646,28 @@ def plot_learning_curve(metrics_dict, plot_fname='learning_curve.pdf', save_metr
 
     # Write Metrics to CSV File
     if save_metrics:
-        csv_file = plot_fname.replace('pdf', 'csv')
-        rows     = zip( epochs, training_loss,  validation_loss,
-                                training_error, validation_error )
+        csv_file  = plot_fname.replace('pdf', 'csv')
+        data_rows = zip( epochs, training_loss,  validation_loss,
+                                 training_error, validation_error )
+        header    = ("epoch", "training_loss",  "validation_loss",
+                              "training_error", "validation_error")
+        write_to_file(csv_file, data_rows, header)
 
-        with open(csv_file, "w") as f:
-            writer = csv.writer(f)
-            writer.writerow(("epoch", "training_loss", "validation_loss", "training_error", "validation_error"))
-            for row in rows:
-                writer.writerow(row)
+
+################################################################################
+
+def write_to_file(filename, data_rows, header):
+    """
+    filename (str): Filename to save data
+    data_rows (zip): Zip object containing data column lists (e.g., zip(colA, colB)
+    header (list): List with column names for header
+    """
+    
+    with open(filename, "w") as f:
+        writer = csv.writer(f)
+        writer.writerow(header)
+        for row in rows:
+            writer.writerow(data_rows)
 
 
 ################################################################################
