@@ -6,7 +6,6 @@ CONTACT: Jennifer Kadowaki (jkadowaki@email.arizona.edu)
 LAST UPDATED: 2020 SEPT 26
 
 TODO:
-[-1] Convert values from recessional velocity (due to Hubble flow) to redshifts.
 [0] Aggregate more data. (!!!!)
 [1] Increase model size since it looks like it's still underfitting the data.
 [2] Test whether custom loss function will help.
@@ -20,6 +19,7 @@ Recently Implemented:
 
 from __future__ import print_function, division
 #import argparse
+import copy
 import csv
 from datetime import datetime
 import glob as g
@@ -29,17 +29,18 @@ import os
 import pandas as pd
 import random
 #import skimage
-#from skimage import io, transform, metrics
+from skimage import io, transform, metrics
 #import sklearn.metrics
 
 import torch as th
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+from torch.optim import lr_scheduler
 import torch.utils.data
 from torch.utils.data import Dataset, DataLoader
 #from torch.utils.tensorboard import SummaryWriter
-from torchvision import transforms, utils
+from torchvision import models, transforms, utils
 
 # Ignore warnings
 import warnings
@@ -49,6 +50,9 @@ warnings.filterwarnings("ignore")
 plt.rcParams.update({ "text.usetex": True,
                       "font.family": "sans-serif",
                       "font.sans-serif": ["Helvetica"] })
+
+# CONSTANTS
+SPEED_OF_LIGHT = 299792.458  # [in units of km/s]
 
 ### NOTE: Confirmed to work for these package versions:
 # NumPy 1.19.1
@@ -125,7 +129,7 @@ class SMUDGesDataset(Dataset):
         # Retrieves the redshift of object at index idx
         cz   = self.smudges_cz.loc[self.smudges_cz.index[idx],"cz"]
         udg = { 'image': image.astype(np.float32),
-                'z':     cz.astype(np.float32) / 299792.458 }
+                'cz':    cz.astype(np.float32) / SPEED_OF_LIGHT }
         
         if False:
             print("NAME: ", obj_name)
@@ -148,12 +152,12 @@ class Random90Rotation:
     """Randomly rotates image by angles of 90 degree increments."""
 
     def __call__(self, udg):
-        image, z     = udg['image'], udg['z']
+        image, cz     = udg['image'], udg['cz']
         num_rotations = np.random.randint(4)
         
         image = np.rot90(image, k=num_rotations)
         
-        return {'image': image, 'z': z}
+        return {'image': image, 'cz': cz}
 
 
 ################################################################################
@@ -162,10 +166,10 @@ class RandomFlip:
     """Randomly rotates image by angles of 90 degree increments."""
 
     def __call__(self, udg):
-        image, z = udg['image'], udg['z']
-        image    = image if random.getrandbits(1) else np.fliplr(image)
+        image, cz = udg['image'], udg['cz']
+        image     = image if random.getrandbits(1) else np.fliplr(image)
         
-        return {'image': image, 'z': z}
+        return {'image': image, 'cz': cz}
 
 
 ################################################################################
@@ -220,11 +224,11 @@ class RandomShift(object):
                                               self.shift_pix+1)
         
         # Computes Image Shift
-        image, z = udg['image'], udg['z']
+        image, cz = udg['image'], udg['cz']
         image     = shift_image(image, vertical_shift)
         image     = shift_image(image, horizontal_shift, vertical=False)
 
-        return {'image': image, 'z': z}
+        return {'image': image, 'cz': cz}
 
 
 ################################################################################
@@ -233,7 +237,7 @@ class ToTensor(object):
     """Convert ndarrays in sample to Tensors."""
 
     def __call__(self, udg):
-        image, z = udg['image'], udg['z']
+        image, cz = udg['image'], udg['cz']
 
         # swap color axis because
         # numpy image: H x W x C
@@ -242,7 +246,7 @@ class ToTensor(object):
         new_image = image.copy().transpose((2, 0, 1))
         
         return { 'image': torch.from_numpy(new_image),
-                  'z': torch.Tensor([[z]]) }
+                  'cz': torch.Tensor([[cz]]) }
 
 
 ################################################################################
@@ -267,7 +271,7 @@ def display_smudges(smudges_dataset, max_display=8,
     for i in range(num_display):
         udg = smudges_dataset[i]
         
-        print(f"{i}  \t{udg['image'].shape} \t{udg['z']}")
+        print(f"{i}  \t{udg['image'].shape} \t{udg['cz']}")
         
         axes[i].axis('off')
         axes[i].imshow(udg['image']/256)
@@ -291,7 +295,7 @@ def display_batches(smudges_dataset, num_display=8,
         original_udg    = smudges_dataset[i]
         transformed_udg = visual_dataset[i]
         
-        print(f"{i}   \t{original_udg['image'].shape} \t{transformed_udg['image'].shape} \t{original_udg['z']}")
+        print(f"{i}   \t{original_udg['image'].shape} \t{transformed_udg['image'].shape} \t{original_udg['cz']}")
         
         axes[0,i].set_ylabel('UDG #{0}'.format(i))
         axes[0,i].axis('off')
@@ -311,7 +315,7 @@ def show_batch(sample_batched, max_value=256):
     Show images in a batch of samples.
     """
 
-    images_batch, z_batch = sample_batched['image'], sample_batched['z']
+    images_batch, cz_batch = sample_batched['image'], sample_batched['cz']
     batch_size = len(images_batch)
     im_size = images_batch.size(2)
     grid_border_size = 2
@@ -326,7 +330,7 @@ def display_batch(dataloader, batch_size=16):
     
     for i_batch, sample_batched in enumerate(dataloader):
         print("\n", i_batch, sample_batched['image'].size(),
-              sample_batched['z'].size())
+              sample_batched['cz'].size())
         
         plt.figure()
         show_batch(sample_batched)
@@ -347,6 +351,11 @@ def display_batch(dataloader, batch_size=16):
 ################################################################################
 
 class SMUDGes_CNN(nn.Module):
+    
+    # Model needs updating. See link below:
+    # https://medium.com/@sundeep.laxman/perform-regression-using-transfer-learning-to-predict-house-prices-97e432a66ba5
+    
+    """
     
     def __init__(self):
         super().__init__()
@@ -379,14 +388,14 @@ class SMUDGes_CNN(nn.Module):
         #print("Step 1", image.shape)
         
         image = self.conv2(image)
-        image = self.leaky_relu2(image)
+        #image = self.leaky_relu2(image)
         #image = self.batch_norm2(image)
         #print("Step 2", image.shape)        
         
         image = F.max_pool2d(image, 4)
         image = self.conv3(image)
         image = self.leaky_relu3(image)
-        #image = self.batch_norm3(image)
+        image = self.batch_norm3(image)
         #print("Step 3", image.shape)
 
         image = self.conv4(image)
@@ -396,15 +405,17 @@ class SMUDGes_CNN(nn.Module):
         
         # Fully Connected Layers
         image = image.view(-1, 1, image.shape[2] * image.shape[3])
-        image = self.dropout4(image)
+        #image = self.dropout4(image)
         image = self.fc3(image)
-        image = self.dropout4(image)
+        #image = self.dropout4(image)
         image = self.fc4(image)
-        image = self.dropout5(image)
+        #image = self.dropout5(image)
         image = self.fc5(image)
         #print("Step 5", image.shape)  
         
         return image.view(-1,1,1)
+    
+    """
 
 
 ################################################################################
@@ -418,6 +429,9 @@ class SMUDGes_CNN(nn.Module):
 def fit(epochs, model, loss_func, opt, patience, train_dl, valid_dl,
         model_directory='checkpoints'):
     
+    best_model_wts = copy.deepcopy(model.state_dict())
+
+
     # Tracks Model Metrics
     metrics_dict = {}
     
@@ -445,13 +459,13 @@ def fit(epochs, model, loss_func, opt, patience, train_dl, valid_dl,
             
             # Load Batched Data
             image = batched_data['image']
-            z     = batched_data['z']
+            cz    = batched_data['cz']
             
             # Computes Total Loss between Model Prediction & Labels
             # Note: This is total loss bc we define it as the sum (i.e., not the
             #       default mean) with parameter reduction='sum' in LOSS_FUNC.
             prediction = model(image)
-            loss = loss_func(prediction, z)
+            loss = loss_func(prediction, cz)
             # Removes Gradients from Previous Batch
             opt.zero_grad()
             # Compute Gradients
@@ -464,7 +478,7 @@ def fit(epochs, model, loss_func, opt, patience, train_dl, valid_dl,
             training_images += len(image)
 
             # Tracks Cumulative Training Percent Error
-            training_error  += th.sum(100 * th.abs((prediction - z) / z)).item()
+            training_error  += th.sum(100 * th.abs((prediction - cz) / cz)).item()
     
 
 
@@ -484,18 +498,18 @@ def fit(epochs, model, loss_func, opt, patience, train_dl, valid_dl,
             
                 # Load Batched Data
                 image = batched_data['image']
-                z     = batched_data['z']
+                cz    = batched_data['cz']
             
                 # Computes Total Loss between Model Prediction & Labels
                 prediction = model(image)
-                loss       = loss_func(prediction, z)
+                loss       = loss_func(prediction, cz)
                 
                 # Tracks Cumulative Loss Per Epoch
                 validation_loss   += loss.item()
                 validation_images += len(image)
     
                 # Tracks Cumulative Validation Percent Error
-                validation_error  += th.sum(100 * th.abs((prediction - z) / z)).item()
+                validation_error  += th.sum(100 * th.abs((prediction - cz) / cz)).item()
     
     
         # Compute Training & Evaluation Losses Per Epoch
@@ -518,11 +532,12 @@ def fit(epochs, model, loss_func, opt, patience, train_dl, valid_dl,
                 pass
 
             # SAVE MODEL
-            datetime_str = datetime.now().strftime("%Y%m%d%H%M%S")
-            MODEL_PATH   = os.path.join( model_directory,
+            best_model_wts = copy.deepcopy(model.state_dict())
+            datetime_str   = datetime.now().strftime("%Y%m%d%H%M%S")
+            MODEL_PATH     = os.path.join( model_directory,
                                         'smudges_redshift_{0}.pt'.format(datetime_str) )
             torch.save({ 'epoch':                epoch,
-                         'model_state_dict':     model.state_dict(),
+                         'model_state_dict':     best_model_wts, #model.state_dict(),
                          'optimizer_state_dict': opt.state_dict(),
                          'loss':                 loss
                        }, MODEL_PATH)
@@ -530,7 +545,7 @@ def fit(epochs, model, loss_func, opt, patience, train_dl, valid_dl,
         else:
             no_improvement += 1
         
-        print(f"{epoch} \t {train_loss_per_epoch:>10.2f} \t {valid_loss_per_epoch:>10.2f} \t {training_error:>9.3f}% \t {validation_error:>9.3f}%" )
+        print(f"{epoch} \t {train_loss_per_epoch:>10.5f} \t {valid_loss_per_epoch:>10.5f} \t {training_error:>9.3f}% \t {validation_error:>9.3f}%" )
 
         # Stops Training if Number of Epochs without Validation Loss Improvement > Patience
         if no_improvement >= patience:
@@ -562,12 +577,15 @@ def generate_predictions(MODEL, dataloader, verbose=True, num_augmentations=10):
         
         for batch in dataloader:
             image    = batch['image']
-            z        = batch['z']
+            cz       = batch['cz']
             estimate = MODEL(image)
             
-            for item in zip(z, estimate):
-                true.append(int(item[0].item()))
-                pred.append(np.round(item[1].item(),2))
+            for item in zip(cz, estimate):
+                print(true)
+                print(pred)
+                
+                true.append(np.round(item[0].item(),4))
+                pred.append(np.round(item[1].item(),4))
                 if verbose:
                     print(true[-1], "\t", pred[-1])
 
@@ -586,18 +604,25 @@ def plot_true_vs_predicted(MODEL, train_dataloader, valid_dataloader,
     # Create Figure
     plt.figure(figsize=(10,10))
     
-    # Plot 1:1 Line
-    plt.plot([-0.01,0.045], [-0.01,0.045], c='g', linestyle='-')
-    
     # Plot Training & Validation Results
     plt.scatter(train_true, train_pred, c='b', marker='.', s=15, label="Training")
     plt.scatter(valid_true, valid_pred, c='r', marker='o', s=50, label="Validation")
     
+    # Adjust Plot Bounds
+    all_values = train_true + train_pred + valid_true + valid_pred
+    minimum   = min(all_values)
+    maximum   = max(all_values)
+    min_bound = min(0.9 * minimum, 1.1 * minimum)
+    max_bound = max(0.9 * maximum, 1.1 * maximum)
+    plt.xlim(min_bound, max_bound)
+    plt.ylim(min_bound, max_bound)
+    
+    # Plot 1:1 Line w/in Plot Bounds
+    plt.plot([min_bound,max_bound], [min_bound,max_bound], c='g', linestyle='-')
+    
     # Plot Formatting
-    plt.xlabel(r"True z (km/s)")
-    plt.ylabel(r"Predicted z (km/s)")
-    plt.xlim(-0.01,0.045)
-    plt.ylim(-0.01,0.045)
+    plt.xlabel(r"True cz (km/s)")
+    plt.ylabel(r"Predicted cz (km/s)")
     plt.legend()
     
     plt.savefig(plot_fname, bbox_inches='tight')
@@ -605,13 +630,13 @@ def plot_true_vs_predicted(MODEL, train_dataloader, valid_dataloader,
     if save_predictions:
     
         def z_to_cz(z_list):
-            return list(299792.458 * np.array(z_list))
+            return list(SPEED_OF_LIGHT * np.array(z_list))
         
         directory     = os.path.dirname(plot_fname)
         train_results = os.path.join(directory,  "train_results.csv")
         valid_results = os.path.join(directory,  "valid_results.csv")
-        train_rows    = zip(z_to_cz(train_true), z_to_cz(train_pred))
-        valid_rows    = zip(z_to_cz(valid_true), z_to_cz(valid_pred))
+        train_rows    = zip(train_true, train_pred) #zip(z_to_cz(train_true), z_to_cz(train_pred))
+        valid_rows    = zip(valid_true, valid_pred) #zip(z_to_cz(valid_true), z_to_cz(valid_pred))
         header        = ("true_cz", "predicted_cz")
         write_to_file(train_results, train_rows, header)
         write_to_file(valid_results, valid_rows, header)
@@ -679,8 +704,8 @@ def write_to_file(filename, data_rows, header):
     with open(filename, "w") as f:
         writer = csv.writer(f)
         writer.writerow(header)
-        for row in rows:
-            writer.writerow(data_rows)
+        for row in data_rows:
+            writer.writerow(row)
 
 
 ################################################################################
@@ -731,12 +756,12 @@ def pipeline(train_model=True, load_pretrained_model=True):
 
     # MODEL PARAMETERS
     MODEL_DIRECTORY = "/Users/jkadowaki/Documents/github/UDG_RedshiftEstimator/checkpoints"
-    MODEL           = SMUDGes_CNN()
+    MODEL           = models.resnet18(pretrained=True) # SMUDGes_CNN()
     AUGMENT_FACTOR  = 2 * 4 * 25
     ITERATIONS      = 2
-    EPOCHS          = int(ITERATIONS * AUGMENT_FACTOR * DATASET_SIZE/BATCH_SIZE)
-    LEARNING_RATE   = 0.0002
-    DECAY           = 0.25
+    EPOCHS          = 5 #int(ITERATIONS * AUGMENT_FACTOR * DATASET_SIZE/BATCH_SIZE)
+    LEARNING_RATE   = 10**-5
+    DECAY           = 0.2# 0.25
     LOSS_FUNC       = nn.MSELoss(reduction='sum')
     OPTIMIZER       = optim.Adam( MODEL.parameters(), lr=LEARNING_RATE,
                                  betas=(0.9, 0.999), eps=1e-08,
@@ -797,7 +822,12 @@ def pipeline(train_model=True, load_pretrained_model=True):
 ################################################################################
 
 if __name__ == "__main__":
+    
+    # Train & Predict
     pipeline(train_model=True, load_pretrained_model=False)
+
+    # Predict only from pre-trained model
+    # pipeline(train_model=False, load_pretrained_model=True)
 
 
 ################################################################################
