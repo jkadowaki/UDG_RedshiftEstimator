@@ -19,6 +19,7 @@ Recently Implemented:
 
 from __future__ import print_function, division
 #import argparse
+from collections import OrderedDict
 import copy
 import csv
 from datetime import datetime
@@ -48,6 +49,7 @@ warnings.filterwarnings("ignore")
 
 # Matplotlib Fonts
 plt.rcParams.update({ "text.usetex": True,
+                      "text.latex.unicode": True,
                       "font.family": "sans-serif",
                       "font.sans-serif": ["Helvetica"] })
 
@@ -60,6 +62,13 @@ SPEED_OF_LIGHT = 299792.458  # [in units of km/s]
 # Scikit-Image 0.17.2
 # PyTorch 1.5.0, 1.6.0
 
+# sudo pip install --user virtualenv  # Install venv (Python3)/ virtual environment (Python2)
+# python3 -m venv smudges_env         # Create a new virtual environment
+# source activate smudges_env         # Activate virtual environment
+# sudo pip install numpy==1.19.1
+# sudo pip install pandas==0.25.1
+# sudo pip install scikit-image==0.17.2
+# sudo pip install torch==1.6.0
 
 ################################################################################
 
@@ -129,7 +138,7 @@ class SMUDGesDataset(Dataset):
         # Retrieves the redshift of object at index idx
         cz   = self.smudges_cz.loc[self.smudges_cz.index[idx],"cz"]
         udg = { 'image': image.astype(np.float32),
-                'cz':    cz.astype(np.float32) / SPEED_OF_LIGHT }
+                'cz':    cz.astype(int) }
         
         if False:
             print("NAME: ", obj_name)
@@ -354,7 +363,7 @@ class SMUDGes_CNN(nn.Module):
     
     # Model needs updating. See link below:
     # https://medium.com/@sundeep.laxman/perform-regression-using-transfer-learning-to-predict-house-prices-97e432a66ba5
-    
+    models.resnet18(pretrained=True)
     """
     
     def __init__(self):
@@ -416,6 +425,53 @@ class SMUDGes_CNN(nn.Module):
         return image.view(-1,1,1)
     
     """
+################################################################################
+
+def build_model(arch, num_classes=1, hidden_units=1024):
+    """
+    Load a pretrained model with only the final layer
+    replaced by a user-defined classifier
+    :param arch - a string specifying the type of model architecture
+    :param num_classes - an integer specifying the number of class labels
+    :param hidden_units - an integer specifying the size
+    return - a pretrained model with a user-defined classifier
+    """
+    in_features = 0
+    try:
+          # model = eval("models." + arch + "(pretrained=True)")
+          model = models.__dict__[arch](pretrained=True)
+    except:
+        raise Exception('Invalid architecture specified')
+      
+    # Freeze parameters as only the final layer is being trained
+    for param in model.parameters():
+        param.require_grad = False
+    # extract the last layer in the model
+    last_layer = list(model.children())[-1]
+    if isinstance(last_layer, nn.Sequential):
+        count = 0
+        for layer in last_layer:
+            if isinstance(layer, nn.Linear):
+                # fetch the first of the many Linear layers
+                count += 1
+                in_features = layer.in_features
+            if count == 1:
+                break
+    elif isinstance(last_layer, nn.Linear):
+        in_features = last_layer.in_features
+    # define the new classifier
+    classifier = nn.Sequential(OrderedDict([
+                            ('bc1', nn.BatchNorm1d(in_features)),
+                            ('relu1', nn.ReLU()),
+                            ('fc1', nn.Linear(in_features, num_classes, bias=True)),
+    ]))
+    # replace the existing classifier in thelast layer with the new one
+    if model.__dict__['_modules'].get('fc', None):
+        model.fc = classifier
+    else:
+        model.classifier = classifier
+
+    return model
 
 
 ################################################################################
@@ -428,9 +484,6 @@ class SMUDGes_CNN(nn.Module):
 
 def fit(epochs, model, loss_func, opt, patience, train_dl, valid_dl,
         model_directory='checkpoints'):
-    
-    best_model_wts = copy.deepcopy(model.state_dict())
-
 
     # Tracks Model Metrics
     metrics_dict = {}
@@ -532,16 +585,16 @@ def fit(epochs, model, loss_func, opt, patience, train_dl, valid_dl,
                 pass
 
             # SAVE MODEL
-            best_model_wts = copy.deepcopy(model.state_dict())
             datetime_str   = datetime.now().strftime("%Y%m%d%H%M%S")
             MODEL_PATH     = os.path.join( model_directory,
-                                        'smudges_redshift_{0}.pt'.format(datetime_str) )
+                                'smudges_redshift_{0}.pt'.format(datetime_str) )
+            last_val_model = MODEL_PATH
+            
             torch.save({ 'epoch':                epoch,
-                         'model_state_dict':     best_model_wts, #model.state_dict(),
+                         'model_state_dict':     model.state_dict(),
                          'optimizer_state_dict': opt.state_dict(),
                          'loss':                 loss
                        }, MODEL_PATH)
-            last_val_model  = MODEL_PATH
         else:
             no_improvement += 1
         
@@ -581,8 +634,8 @@ def generate_predictions(MODEL, dataloader, verbose=True, num_augmentations=10):
             estimate = MODEL(image)
             
             for item in zip(cz, estimate):
-                print(true)
-                print(pred)
+                #print(true)
+                #print(pred)
                 
                 true.append(np.round(item[0].item(),4))
                 pred.append(np.round(item[1].item(),4))
@@ -716,11 +769,11 @@ def write_to_file(filename, data_rows, header):
 #                                                                              #
 ################################################################################
 
-def pipeline(train_model=True, load_pretrained_model=True):
+def pipeline(train_model=True, load_checkpoint=True):
 
 
     # LOAD DATA
-    ROOT_DIR            = "/Users/jkadowaki/dataset"
+    ROOT_DIR            = "/Users/jennifer_kadowaki/Documents/GitHub/UDG_RedshiftEstimator/dataset" #"/Users/jkadowaki/dataset"
     transformed_dataset = SMUDGesDataset(
                           csv_file=os.path.join(ROOT_DIR, "training.csv"),
                           root_dir=os.path.join(ROOT_DIR, "training", "zoom15"),
@@ -752,16 +805,17 @@ def pipeline(train_model=True, load_pretrained_model=True):
     DATASET_SIZE      = 68
     BATCH_SIZE        = 16
     TRAINING_FRACTION = 0.8
-    NUM_NODES         = 2
+    NUM_NODES         = 4
 
     # MODEL PARAMETERS
-    MODEL_DIRECTORY = "/Users/jkadowaki/Documents/github/UDG_RedshiftEstimator/checkpoints"
-    MODEL           = models.resnet18(pretrained=True) # SMUDGes_CNN()
+    PROJECT         = "/Users/jennifer_kadowaki/Documents/GitHub/UDG_RedshiftEstimator" #"/Users/jkadowaki/Documents/github/UDG_RedshiftEstimator"
+    MODEL_DIRECTORY = os.path.join(PROJECT, "checkpoints")
+    MODEL           = build_model("resnet18", hidden_units=64) # SMUDGes_CNN()
     AUGMENT_FACTOR  = 2 * 4 * 25
     ITERATIONS      = 2
-    EPOCHS          = 5 #int(ITERATIONS * AUGMENT_FACTOR * DATASET_SIZE/BATCH_SIZE)
-    LEARNING_RATE   = 10**-5
-    DECAY           = 0.2# 0.25
+    EPOCHS          = int(ITERATIONS * AUGMENT_FACTOR * DATASET_SIZE/BATCH_SIZE)
+    LEARNING_RATE   = 10**-4
+    DECAY           = 0.25
     LOSS_FUNC       = nn.MSELoss(reduction='sum')
     OPTIMIZER       = optim.Adam( MODEL.parameters(), lr=LEARNING_RATE,
                                  betas=(0.9, 0.999), eps=1e-08,
@@ -770,7 +824,7 @@ def pipeline(train_model=True, load_pretrained_model=True):
 
 
     # RESULTS PARAMETERS
-    RESULTS_DIRECTORY   = "/Users/jkadowaki/Documents/github/UDG_RedshiftEstimator/results"
+    RESULTS_DIRECTORY   = os.path.join(PROJECT, "results")
     RESULTS_FILE        = os.path.join(RESULTS_DIRECTORY, "true_vs_pred.pdf")
     LEARNING_CURVE_FILE = os.path.join(RESULTS_DIRECTORY, "learning_curve.pdf")
 
@@ -789,7 +843,7 @@ def pipeline(train_model=True, load_pretrained_model=True):
 
 
     # LOAD PRETRAINED MODEL TO CONTINUE TRAINING OR
-    if load_pretrained_model:
+    if load_checkpoint:
         
         LATEST_CHECKPOINT = max(g.glob(os.path.join(MODEL_DIRECTORY,'*')))
         checkpoint_dict   = torch.load(LATEST_CHECKPOINT)
@@ -824,10 +878,10 @@ def pipeline(train_model=True, load_pretrained_model=True):
 if __name__ == "__main__":
     
     # Train & Predict
-    pipeline(train_model=True, load_pretrained_model=False)
+    pipeline(train_model=True, load_checkpoint=False)
 
     # Predict only from pre-trained model
-    # pipeline(train_model=False, load_pretrained_model=True)
+    # pipeline(train_model=False, load_checkpoint=True)
 
 
 ################################################################################
