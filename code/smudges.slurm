@@ -14,17 +14,22 @@
 
 PROJECT_DIRECTORY=/home/u11/jkadowaki/UDG_RedshiftEstimator
 CODE=$PROJECT_DIRECTORY/code 
+OUTPUT=$PROJECT_DIRECTORY/slurm_output
 
 # Activates Python Virtual Environment
 source $PROJECT_DIRECTORY/smudges_env/bin/activate
 
 cd $CODE
+mkdir -p $OUTPUT
 
+# Run SMUDGes Model
+# Print Start, End Times + Duration
 echo "START: $(date +%Y/%m/%d' '%H:%M:%S)"
-
 START_TIME=$(date +%s)
 python3 ./smudges_cnn_model.py
 END_TIME=$(date +%s)
-
 echo "END:      $(date +%Y/%m/%d' '%H:%M:%S)"
-echo "DURATION: $((ETIME-STIME)) seconds"
+echo "DURATION: $((END_TIME-START_TIME)) seconds"
+
+# Moves all output files to OUTPUT directory
+mv $PROJECT_DIRECTORY/slurm-*.out $OUTPUT
