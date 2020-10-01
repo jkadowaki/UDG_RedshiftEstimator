@@ -812,7 +812,7 @@ def pipeline(train_model=True, load_checkpoint=True):
     # MODEL PARAMETERS
     PROJECT         = "/Users/jennifer_kadowaki/Documents/GitHub/UDG_RedshiftEstimator" #"/Users/jkadowaki/Documents/github/UDG_RedshiftEstimator"
     MODEL_DIRECTORY = os.path.join(PROJECT, "checkpoints")
-    MODEL           = build_model("resnet18", hidden_units=64) # SMUDGes_CNN()
+    MODEL           = build_model("resnet50", hidden_units=64) # SMUDGes_CNN()
     AUGMENT_FACTOR  = 2 * 4 * 25
     ITERATIONS      = 2
     EPOCHS          = int(ITERATIONS * AUGMENT_FACTOR * DATASET_SIZE/BATCH_SIZE)

@@ -9,10 +9,22 @@
 ###SBATCH --gres=gpu:1                   
 #SBATCH --time=00:30:00   
 #SBATCH --partition=standard
-#SBATCH --account=<group_name>   
+#SBATCH --account=dfz 
  
-# SLURM Inherits your environment. cd $SLURM_SUBMIT_DIR not needed
-pwd; hostname; date
- 
-module load python
-python --version
+
+PROJECT_DIRECTORY=/home/u11/jkadowaki/UDG_RedshiftEstimator
+CODE=$PROJECT_DIRECTORY/code 
+
+# Activates Python Virtual Environment
+source $PROJECT_DIRECTORY/smudges_env/bin/activate
+
+cd $CODE
+
+echo "START: $(date +%Y/%m/%d' '%H:%M:%S)"
+
+START_TIME=$(date +%s)
+python3 ./smudges_cnn_model.py
+END_TIME=$(date +%s)
+
+echo "END:      $(date +%Y/%m/%d' '%H:%M:%S)"
+echo "DURATION: $((ETIME-STIME)) seconds"
