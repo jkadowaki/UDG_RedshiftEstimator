@@ -443,9 +443,10 @@ def build_model(arch, num_classes=1, hidden_units=1024):
     except:
         raise Exception('Invalid architecture specified')
       
-    # Freeze parameters as only the final layer is being trained
-    for param in model.parameters():
-        param.require_grad = False
+    # Don't do this --> # Freeze parameters as only the final layer is being trained
+    #for param in model.parameters():
+    #    param.require_grad = False
+    
     # extract the last layer in the model
     last_layer = list(model.children())[-1]
     if isinstance(last_layer, nn.Sequential):
@@ -459,12 +460,13 @@ def build_model(arch, num_classes=1, hidden_units=1024):
                 break
     elif isinstance(last_layer, nn.Linear):
         in_features = last_layer.in_features
+        
     # define the new classifier
     classifier = nn.Sequential(OrderedDict([
-                            ('bc1', nn.BatchNorm1d(in_features)),
-                            ('relu1', nn.ReLU()),
-                            ('fc1', nn.Linear(in_features, num_classes, bias=True)),
-    ]))
+                    #('bc1', nn.BatchNorm1d(in_features)),
+                    ('relu1', nn.ReLU()),
+                    ('fc1', nn.Linear(in_features, num_classes, bias=True))]))
+    
     # replace the existing classifier in thelast layer with the new one
     if model.__dict__['_modules'].get('fc', None):
         model.fc = classifier
