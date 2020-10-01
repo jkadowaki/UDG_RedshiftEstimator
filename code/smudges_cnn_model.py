@@ -49,7 +49,6 @@ warnings.filterwarnings("ignore")
 
 # Matplotlib Fonts
 plt.rcParams.update({ "text.usetex": True,
-                      "text.latex.unicode": True,
                       "font.family": "sans-serif",
                       "font.sans-serif": ["Helvetica"] })
 
@@ -69,6 +68,7 @@ SPEED_OF_LIGHT = 299792.458  # [in units of km/s]
 # sudo pip install pandas==0.25.1
 # sudo pip install scikit-image==0.17.2
 # sudo pip install torch==1.6.0
+# wget -qO- "https://yihui.org/tinytex/install-bin-unix.sh" | sh
 
 ################################################################################
 
