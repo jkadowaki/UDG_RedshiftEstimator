@@ -123,9 +123,9 @@ class SMUDGesDataset(Dataset):
             idx = idx.tolist()
 
         # Image Suffixes
-        residual = f"_dr8-resid_zoom{self.zoom}.jpeg"
-        model    = f"_dr8-model_zoom{self.zoom}.jpeg"
-        dr8_data = f"_dr8_zoom{self.zoom}.jpeg"
+        residual = f"_dr8-resid_zoom{self.zoom}.jpg"
+        model    = f"_dr8-model_zoom{self.zoom}.jpg"
+        dr8_data = f"_dr8_zoom{self.zoom}.jpg"
         suffix   = residual   if self.image_type in ["r", "resid", "residual"] \
                    else model if self.image_type in ["m", "model"] \
                    else dr8_data
