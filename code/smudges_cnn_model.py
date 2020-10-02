@@ -496,9 +496,10 @@ def fit(epochs, model, loss_func, opt, patience, train_dl, valid_dl,
     no_improvement = 0
     
     
-    print("\n---------------------------------------------------------------------------")
-    print(  "EPOCH    TRAINING_LOSS   VALIDATION_LOSS   TRAINING_ERROR  VALIDATION_ERROR")
-    print(  "---------------------------------------------------------------------------")
+    print("-"*83)
+    print("EPOCH" + " "*4 + "TRAINING_LOSS" + " "*11 + "VALIDATION_LOSS" + \
+          " "*10 + "TRAINING_ERROR" + " "*7 + "VALIDATION_ERROR")
+    print("-"*83)
     for epoch in range(epochs):
         
         # Training Metrics
@@ -607,7 +608,7 @@ def fit(epochs, model, loss_func, opt, patience, train_dl, valid_dl,
             print(f"Training Ended Early Due to No Performance Gains Since Epoch {epoch-patience}.")
             break
     
-    print("---------------------------------------------------------------------------\n")
+    print("-"*83 + "\n")
 
     return metrics_dict
 
@@ -812,7 +813,7 @@ def pipeline(train_model=True, load_checkpoint=True):
     DATASET_SIZE      = 68
     BATCH_SIZE        = 16
     TRAINING_FRACTION = 0.8
-    NUM_NODES         = 4
+    NUM_NODES         = 94 if PROJECT==HPC else 4
 
     # MODEL PARAMETERS
     MODEL_DIRECTORY = os.path.join(PROJECT, "checkpoints")

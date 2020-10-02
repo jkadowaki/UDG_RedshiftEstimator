@@ -12,7 +12,7 @@ PS_ZOOM15=0.13
 PS_ZOOM16=0.06
 
 # CHANGE LINE 15 IF YOU WANT TO CHANGE THE RESOLUTION.
-ZOOM_LABEL=zoom16  # Set to one of: {zoom13, zoom14, zoom15, zoom16}
+ZOOM_LABEL=zoom15  # Set to one of: {zoom13, zoom14, zoom15, zoom16}
 ZOOM=$([[ "$ZOOM_LABEL" = "zoom13" ]] && echo "$PS_ZOOM13" || echo \
     "$([[ "$ZOOM_LABEL" = "zoom14" ]] && echo "$PS_ZOOM14" || echo \
     "$([[ "$ZOOM_LABEL" = "zoom16" ]] && echo "$PS_ZOOM16" || echo "$PS_ZOOM15")")")
@@ -38,7 +38,7 @@ function get_postage_stamp () {
     LAYER=$1
 	
 	# Step 1: Uses awk to format the link and destination file for each UDG
-	# Step 2: Uses curl to download and uses the output from Step 1 as the inputs
+	# Step 2: Uses wget to download and uses the output from Step 1 as the inputs
     awk -F, -v LINK=$LINK -v PS=$ZOOM -v LABEL=$ZOOM_LABEL -v LAYER=$LAYER -v OUTPUT_DIR=$OUTPUT_DIR \
         'FNR>1 {printf LINK,$2,$3,LAYER,PS; print " " OUTPUT_DIR"/"$1"_"LAYER"_"LABEL".jpg"}' $TMP | \
         xargs -n2 bash -c 'wget -nv -O $2 $1' bash #xargs -n2 bash -c 'curl $1 --output $2' bash
