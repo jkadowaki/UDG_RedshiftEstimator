@@ -773,12 +773,17 @@ def write_to_file(filename, data_rows, header):
 
 def pipeline(train_model=True, load_checkpoint=True):
 
+    # Paths on probably platforms
+    HPC  = "/home/u11/jkadowaki/UDG_RedshiftEstimator"
+    MBP  = "/Users/jennifer_kadowaki/Documents/GitHub/UDG_RedshiftEstimator"
+    MINI = "/Users/jkadowaki/Documents/github/UDG_RedshiftEstimator"
 
     # LOAD DATA
-    ROOT_DIR            = "/Users/jennifer_kadowaki/Documents/GitHub/UDG_RedshiftEstimator/dataset" #"/Users/jkadowaki/dataset"
+    PROJECT  = HPC
+    DATA_DIR = os.path.join(PROJECT, "dataset")
     transformed_dataset = SMUDGesDataset(
-                          csv_file=os.path.join(ROOT_DIR, "training.csv"),
-                          root_dir=os.path.join(ROOT_DIR, "training", "zoom15"),
+                          csv_file=os.path.join(DATA_DIR, "training.csv"),
+                          root_dir=os.path.join(DATA_DIR, "training", "zoom15"),
                           transform=transforms.Compose([
                                         RandomFlip(),
                                         Random90Rotation(),
@@ -789,8 +794,8 @@ def pipeline(train_model=True, load_checkpoint=True):
 
     """
     smudges_dataset = SMUDGesDataset(
-                        csv_file=os.path.join(ROOT_DIR, "training.csv"),
-                        root_dir=os.path.join(ROOT_DIR, "training", "zoom15"),
+                        csv_file=os.path.join(DATA_DIR, "training.csv"),
+                        root_dir=os.path.join(DATA_DIR, "training", "zoom15"),
                         transform=transforms.Compose([
                                    RandomFlip(),
                                    Random90Rotation(),
@@ -810,7 +815,6 @@ def pipeline(train_model=True, load_checkpoint=True):
     NUM_NODES         = 4
 
     # MODEL PARAMETERS
-    PROJECT         = "/Users/jennifer_kadowaki/Documents/GitHub/UDG_RedshiftEstimator" #"/Users/jkadowaki/Documents/github/UDG_RedshiftEstimator"
     MODEL_DIRECTORY = os.path.join(PROJECT, "checkpoints")
     MODEL           = build_model("resnet50", hidden_units=64) # SMUDGes_CNN()
     AUGMENT_FACTOR  = 2 * 4 * 25
