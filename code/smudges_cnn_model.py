@@ -484,22 +484,42 @@ def build_model(arch, num_classes=1, hidden_units=1024):
 #                                                                              #
 ################################################################################
 
+def compute_running_loss(model, loss_func, batched_data, device='cpu'):
+    # Load Batched Data
+    image = batched_data['image'].to(device)
+    cz    = batched_data['cz'].to(device)
+    
+    # Computes Total Loss between Model Prediction & Labels
+    # Note: This is total loss bc we define it as the sum (i.e., not the
+    #       default mean) with parameter reduction='sum' in LOSS_FUNC.
+    prediction    = model(image)
+    loss          = loss_func(prediction, cz)
+    percent_error = th.sum(100 * th.abs((prediction - cz) / cz)).item()
+    
+    # Returns Total Loss, Total % Error, & Number of Examples in Batch
+    return loss, percent_error, len(images)
+
+
+################################################################################
+
 def fit(epochs, model, loss_func, opt, patience, train_dl, valid_dl,
-        model_directory='checkpoints'):
+        device='cpu', model_directory='checkpoints'):
 
     # Tracks Model Metrics
     metrics_dict = {}
     
     # Early Stopping Metrics
     last_val_model = None
-    min_val_loss   = 99999999999999999999999 # Initialize to Large Number
+    min_val_loss   = 10**10 # Initialize to Large Number
     no_improvement = 0
     
     
-    print("-"*83)
+    print("-"*90)
     print("EPOCH" + " "*4 + "TRAINING_LOSS" + " "*11 + "VALIDATION_LOSS" + \
           " "*10 + "TRAINING_ERROR" + " "*7 + "VALIDATION_ERROR")
-    print("-"*83)
+    print("-"*90)
+
+    
     for epoch in range(epochs):
         
         # Training Metrics
@@ -509,34 +529,26 @@ def fit(epochs, model, loss_func, opt, patience, train_dl, valid_dl,
         
         # Switches Model to Training Mode
         model.train()
-        
+    
         # Computes Gradients & Updates Model After Every Mini-Batch
         for batched_data in train_dl:
-            
-            # Load Batched Data
-            image = batched_data['image']
-            cz    = batched_data['cz']
-            
-            # Computes Total Loss between Model Prediction & Labels
-            # Note: This is total loss bc we define it as the sum (i.e., not the
-            #       default mean) with parameter reduction='sum' in LOSS_FUNC.
-            prediction = model(image)
-            loss = loss_func(prediction, cz)
+        
             # Removes Gradients from Previous Batch
             opt.zero_grad()
+        
+            # Compute Batch Loss, Error, & Number of Training Examples
+            loss, batch_err, batch_ex = compute_running_loss(model, loss_func, batched_data, device)
+            
             # Compute Gradients
             loss.backward()
             # Update Model
             opt.step()
             
-            # Tracks Cumulative Loss Per Epoch
+            # Tracks Cumulative Training Loss & Percent Error Per Epoch
             training_loss   += loss.item()
-            training_images += len(image)
-
-            # Tracks Cumulative Training Percent Error
-            training_error  += th.sum(100 * th.abs((prediction - cz) / cz)).item()
-    
-
+            training_error  += batch_err
+            training_images += batch_ex
+            
 
         # Validation Metrics
         validation_loss   = 0.
@@ -552,21 +564,14 @@ def fit(epochs, model, loss_func, opt, patience, train_dl, valid_dl,
             # Tracks Validation Losses Across Every Mini-Batch
             for batched_data in valid_dl:
             
-                # Load Batched Data
-                image = batched_data['image']
-                cz    = batched_data['cz']
+                # Compute Batch Loss, Error, & Number of Training Examples
+                batch_loss, batch_err, batch_ex = compute_running_loss(model, loss_func, batched_data, device)
             
-                # Computes Total Loss between Model Prediction & Labels
-                prediction = model(image)
-                loss       = loss_func(prediction, cz)
+                # Tracks Cumulative Validation Loss & Percent Error Per Epoch
+                validation_loss   += batch_loss.item()
+                validation_error  += batch_err
+                validation_images += batch_ex
                 
-                # Tracks Cumulative Loss Per Epoch
-                validation_loss   += loss.item()
-                validation_images += len(image)
-    
-                # Tracks Cumulative Validation Percent Error
-                validation_error  += th.sum(100 * th.abs((prediction - cz) / cz)).item()
-    
     
         # Compute Training & Evaluation Losses Per Epoch
         train_loss_per_epoch = training_loss   / training_images
@@ -608,7 +613,7 @@ def fit(epochs, model, loss_func, opt, patience, train_dl, valid_dl,
             print(f"Training Ended Early Due to No Performance Gains Since Epoch {epoch-patience}.")
             break
     
-    print("-"*83 + "\n")
+    print("-"*90 + "\n")
 
     return metrics_dict
 
@@ -775,9 +780,10 @@ def write_to_file(filename, data_rows, header):
 def pipeline(train_model=True, load_checkpoint=True):
 
     # Paths on probably platforms
-    HPC  = "/home/u11/jkadowaki/UDG_RedshiftEstimator"
-    MBP  = "/Users/jennifer_kadowaki/Documents/GitHub/UDG_RedshiftEstimator"
-    MINI = "/Users/jkadowaki/Documents/github/UDG_RedshiftEstimator"
+    HPC    = "/home/u11/jkadowaki/UDG_RedshiftEstimator"
+    MBP    = "/Users/jennifer_kadowaki/Documents/GitHub/UDG_RedshiftEstimator"
+    MINI   = "/Users/jkadowaki/Documents/github/UDG_RedshiftEstimator"
+    device = th.device("cuda" is th.cuda.is_available() else "cpu")
 
     # LOAD DATA
     PROJECT  = HPC
@@ -792,6 +798,8 @@ def pipeline(train_model=True, load_checkpoint=True):
                                         ToTensor() ]),
                           zoom=15,
                           image_type='dr8_data' )
+
+    print("TRAINING. ")
 
     """
     smudges_dataset = SMUDGesDataset(
@@ -828,6 +836,9 @@ def pipeline(train_model=True, load_checkpoint=True):
                                  betas=(0.9, 0.999), eps=1e-08,
                                  weight_decay=DECAY, amsgrad=False )
     PATIENCE        = 15
+    
+    # USES GPU IF AVAILABLE
+    MODEL.to(device)
 
 
     # RESULTS PARAMETERS
@@ -867,7 +878,8 @@ def pipeline(train_model=True, load_checkpoint=True):
         # TRAIN & EVALUATION
         MODEL.train()
         metrics_dict = fit(EPOCHS, MODEL, LOSS_FUNC, OPTIMIZER, PATIENCE,
-                           train_dataloader, valid_dataloader, MODEL_DIRECTORY)
+                           train_dataloader, valid_dataloader,
+                           device, MODEL_DIRECTORY)
         plot_learning_curve(metrics_dict, plot_fname=LEARNING_CURVE_FILE)
 
 
