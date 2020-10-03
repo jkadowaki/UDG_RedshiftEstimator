@@ -486,13 +486,13 @@ def build_model(arch, num_classes=1, hidden_units=1024):
 
 def compute_running_loss(model, loss_func, batched_data, device='cpu'):
     # Load Batched Data
-    image = batched_data['image'].to(device)
-    cz    = batched_data['cz'].to(device)
+    images = batched_data['image'].to(device)
+    cz     = batched_data['cz'].to(device)
     
     # Computes Total Loss between Model Prediction & Labels
     # Note: This is total loss bc we define it as the sum (i.e., not the
     #       default mean) with parameter reduction='sum' in LOSS_FUNC.
-    prediction    = model(image)
+    prediction    = model(images)
     loss          = loss_func(prediction, cz)
     percent_error = th.sum(100 * th.abs((prediction - cz) / cz)).item()
     
@@ -783,7 +783,7 @@ def pipeline(train_model=True, load_checkpoint=True):
     HPC    = "/home/u11/jkadowaki/UDG_RedshiftEstimator"
     MBP    = "/Users/jennifer_kadowaki/Documents/GitHub/UDG_RedshiftEstimator"
     MINI   = "/Users/jkadowaki/Documents/github/UDG_RedshiftEstimator"
-    device = th.device("cuda" is th.cuda.is_available() else "cpu")
+    device = th.device("cuda" if th.cuda.is_available() else "cpu")
 
     # LOAD DATA
     PROJECT  = HPC
@@ -821,7 +821,7 @@ def pipeline(train_model=True, load_checkpoint=True):
     DATASET_SIZE      = 68
     BATCH_SIZE        = 16
     TRAINING_FRACTION = 0.8
-    NUM_NODES         = 94 if PROJECT==HPC else 4
+    NUM_NODES         = 0 if "cuda" in device else  94 if PROJECT==HPC else 4
 
     # MODEL PARAMETERS
     MODEL_DIRECTORY = os.path.join(PROJECT, "checkpoints")

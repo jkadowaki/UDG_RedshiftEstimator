@@ -6,7 +6,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=94             
 #SBATCH --mem=470gb
-###SBATCH --gres=gpu:1                   
+#SBATCH --gres=gpu:1                   
 #SBATCH --time=00:30:00   
 #SBATCH --partition=standard
 #SBATCH --account=dfz 
@@ -32,4 +32,6 @@ echo "END:      $(date +%Y/%m/%d' '%H:%M:%S)"
 echo "DURATION: $((END_TIME-START_TIME)) seconds"
 
 # Moves all output files to OUTPUT directory
-mv $PROJECT_DIRECTORY/slurm-*.out $OUTPUT
+[ -f $CODE/slurm-*.out ] && FILE=$CODE/slurm-*.out
+[ -f slurm-*.out ] && FILE=slurm-*.out 
+mv $FILE $OUTPUT
