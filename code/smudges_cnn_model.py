@@ -602,7 +602,7 @@ def fit(epochs, model, loss_func, opt, patience, train_dl, valid_dl,
             torch.save({ 'epoch':                epoch,
                          'model_state_dict':     model.state_dict(),
                          'optimizer_state_dict': opt.state_dict(),
-                         'loss':                 loss.item()
+                         'loss':                 loss
                        }, MODEL_PATH)
         else:
             no_improvement += 1
@@ -778,16 +778,10 @@ def write_to_file(filename, data_rows, header):
 #                                                                              #
 ################################################################################
 
-def pipeline(train_model=True, load_checkpoint=True):
-
-    # Paths on probably platforms
-    HPC    = "/home/u11/jkadowaki/UDG_RedshiftEstimator"
-    MBP    = "/Users/jennifer_kadowaki/Documents/GitHub/UDG_RedshiftEstimator"
-    MINI   = "/Users/jkadowaki/Documents/github/UDG_RedshiftEstimator"
-    device = th.device("cuda:0" if th.cuda.is_available() else "cpu")
+def pipeline(PROJECT, train_model=True, load_checkpoint=True):
 
     # LOAD DATA
-    PROJECT  = HPC
+    device   = th.device("cuda:0" if th.cuda.is_available() else "cpu")
     DATA_DIR = os.path.join(PROJECT, "dataset")
     transformed_dataset = SMUDGesDataset(
                           csv_file=os.path.join(DATA_DIR, "training.csv"),
@@ -863,9 +857,10 @@ def pipeline(train_model=True, load_checkpoint=True):
 
     # LOAD PRETRAINED MODEL TO CONTINUE TRAINING OR
     if load_checkpoint:
-        
+        map_location = 'cpu' if not th.cuda.is_available() else lambda storage, loc: storage.cuda() 
+                
         LATEST_CHECKPOINT = max(g.glob(os.path.join(MODEL_DIRECTORY,'*')))
-        checkpoint_dict   = torch.load(LATEST_CHECKPOINT)
+        checkpoint_dict   = th.load(LATEST_CHECKPOINT, map_location=map_location)
 
         print(checkpoint_dict.keys())
         print([type(val) for key,val in checkpoint_dict.items()])
@@ -900,11 +895,17 @@ def pipeline(train_model=True, load_checkpoint=True):
 
 if __name__ == "__main__":
     
+     
+    # Paths on probably platforms
+    HPC    = "/home/u11/jkadowaki/UDG_RedshiftEstimator"
+    MBP    = "/Users/jennifer_kadowaki/Documents/GitHub/UDG_RedshiftEstimator"
+    MINI   = "/Users/jkadowaki/Documents/github/UDG_RedshiftEstimator"
+
     # Train & Predict
-    # pipeline(train_model=True, load_checkpoint=False)
+    # pipeline(PROJECT=HPC, train_model=True, load_checkpoint=False)
 
     # Predict only from pre-trained model
-    pipeline(train_model=True, load_checkpoint=True)
+    pipeline(PROJECT=MBP, train_model=False, load_checkpoint=True)
 
 
 ################################################################################
