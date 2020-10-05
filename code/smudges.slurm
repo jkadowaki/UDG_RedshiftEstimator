@@ -32,6 +32,5 @@ echo "END:      $(date +%Y/%m/%d' '%H:%M:%S)"
 echo "DURATION: $((END_TIME-START_TIME)) seconds"
 
 # Moves all output files to OUTPUT directory
-[ -f $CODE/slurm-*.out ] && FILE=$CODE/slurm-*.out
-[ -f slurm-*.out ] && FILE=slurm-*.out 
-mv $FILE $OUTPUT
+[ -f $CODE/slurm-*.out ] && mv $CODE/slurm-*.out $OUTPUT
+[ -f slurm-*.out ] && mv slurm-*.out $OUTPUT

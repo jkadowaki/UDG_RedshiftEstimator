@@ -123,11 +123,12 @@ class SMUDGesDataset(Dataset):
             idx = idx.tolist()
 
         # Image Suffixes
-        residual = f"_dr8-resid_zoom{self.zoom}.jpg"
-        model    = f"_dr8-model_zoom{self.zoom}.jpg"
-        dr8_data = f"_dr8_zoom{self.zoom}.jpg"
-        suffix   = residual   if self.image_type in ["r", "resid", "residual"] \
-                   else model if self.image_type in ["m", "model"] \
+        residual = "_dr8-resid_zoom{0}.jpg".format(self.zoom)
+        model    = "_dr8-model_zoom{0}.jpg".format(self.zoom)
+        dr8_data = "_dr8_zoom{0}.jpg".format(self.zoom)
+        suffix   = residual   if self.image_type in ["r",         "resid",     "residual", \
+                                                     "dr8-r", "dr8-resid", "dr8-residual"] \
+                   else model if self.image_type in ["m", "model", "dr8-m", "dr8-model"]   \
                    else dr8_data
 
         # Retrieves the name of the file associated with object in index idx
@@ -358,13 +359,13 @@ def display_batch(dataloader, batch_size=16):
 #                           REDSHIFT ESTIMATION MODEL                          #
 #                                                                              #
 ################################################################################
-
+"""
 class SMUDGes_CNN(nn.Module):
     
     # Model needs updating. See link below:
     # https://medium.com/@sundeep.laxman/perform-regression-using-transfer-learning-to-predict-house-prices-97e432a66ba5
     models.resnet18(pretrained=True)
-    """
+ 
     
     def __init__(self):
         super().__init__()
@@ -424,7 +425,7 @@ class SMUDGes_CNN(nn.Module):
         
         return image.view(-1,1,1)
     
-    """
+"""
 ################################################################################
 
 def build_model(arch, num_classes=1, hidden_units=1024):
@@ -514,10 +515,10 @@ def fit(epochs, model, loss_func, opt, patience, train_dl, valid_dl,
     no_improvement = 0
     
     
-    print("-"*90)
+    print("-"*95)
     print("EPOCH" + " "*4 + "TRAINING_LOSS" + " "*11 + "VALIDATION_LOSS" + \
           " "*10 + "TRAINING_ERROR" + " "*7 + "VALIDATION_ERROR")
-    print("-"*90)
+    print("-"*95)
 
     
     for epoch in range(epochs):
@@ -601,7 +602,7 @@ def fit(epochs, model, loss_func, opt, patience, train_dl, valid_dl,
             torch.save({ 'epoch':                epoch,
                          'model_state_dict':     model.state_dict(),
                          'optimizer_state_dict': opt.state_dict(),
-                         'loss':                 loss
+                         'loss':                 loss.item()
                        }, MODEL_PATH)
         else:
             no_improvement += 1
@@ -613,7 +614,7 @@ def fit(epochs, model, loss_func, opt, patience, train_dl, valid_dl,
             print(f"Training Ended Early Due to No Performance Gains Since Epoch {epoch-patience}.")
             break
     
-    print("-"*90 + "\n")
+    print("-"*95 + "\n")
 
     return metrics_dict
 
@@ -783,7 +784,7 @@ def pipeline(train_model=True, load_checkpoint=True):
     HPC    = "/home/u11/jkadowaki/UDG_RedshiftEstimator"
     MBP    = "/Users/jennifer_kadowaki/Documents/GitHub/UDG_RedshiftEstimator"
     MINI   = "/Users/jkadowaki/Documents/github/UDG_RedshiftEstimator"
-    device = th.device("cuda" if th.cuda.is_available() else "cpu")
+    device = th.device("cuda:0" if th.cuda.is_available() else "cpu")
 
     # LOAD DATA
     PROJECT  = HPC
@@ -798,8 +799,6 @@ def pipeline(train_model=True, load_checkpoint=True):
                                         ToTensor() ]),
                           zoom=15,
                           image_type='dr8_data' )
-
-    print("TRAINING. ")
 
     """
     smudges_dataset = SMUDGesDataset(
@@ -821,7 +820,9 @@ def pipeline(train_model=True, load_checkpoint=True):
     DATASET_SIZE      = 68
     BATCH_SIZE        = 16
     TRAINING_FRACTION = 0.8
-    NUM_NODES         = 0 if "cuda" in device else  94 if PROJECT==HPC else 4
+    NUM_NODES         = 0 if th.cuda.is_available() else 94 if PROJECT==HPC else 4
+
+    print(f"TRAINING ON {device} with {NUM_NODES} workers.")
 
     # MODEL PARAMETERS
     MODEL_DIRECTORY = os.path.join(PROJECT, "checkpoints")
@@ -865,9 +866,12 @@ def pipeline(train_model=True, load_checkpoint=True):
         
         LATEST_CHECKPOINT = max(g.glob(os.path.join(MODEL_DIRECTORY,'*')))
         checkpoint_dict   = torch.load(LATEST_CHECKPOINT)
+
+        print(checkpoint_dict.keys())
+        print([type(val) for key,val in checkpoint_dict.items()])
         
         EPOCHS    = checkpoint_dict['epoch']
-        LOSS_FUNC = checkpoint_dict['loss']
+        LOSS      = checkpoint_dict['loss'].item() 
         MODEL.load_state_dict(checkpoint_dict['model_state_dict'])
         OPTIMIZER.load_state_dict(checkpoint_dict['optimizer_state_dict'])
 
@@ -897,10 +901,10 @@ def pipeline(train_model=True, load_checkpoint=True):
 if __name__ == "__main__":
     
     # Train & Predict
-    pipeline(train_model=True, load_checkpoint=False)
+    # pipeline(train_model=True, load_checkpoint=False)
 
     # Predict only from pre-trained model
-    # pipeline(train_model=False, load_checkpoint=True)
+    pipeline(train_model=True, load_checkpoint=True)
 
 
 ################################################################################
