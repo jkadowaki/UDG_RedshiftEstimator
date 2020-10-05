@@ -485,7 +485,7 @@ def build_model(arch, num_classes=1, hidden_units=1024):
 #                                                                              #
 ################################################################################
 
-def compute_running_loss(model, loss_func, batched_data, device='cpu'):
+def compute_running_loss(model, batched_data, device='cpu'):
     # Load Batched Data
     images = batched_data['image'].to(device)
     cz     = batched_data['cz'].to(device)
@@ -494,16 +494,17 @@ def compute_running_loss(model, loss_func, batched_data, device='cpu'):
     # Note: This is total loss bc we define it as the sum (i.e., not the
     #       default mean) with parameter reduction='sum' in LOSS_FUNC.
     prediction    = model(images)
-    loss          = loss_func(prediction, cz)
-    percent_error = th.sum(100 * th.abs((prediction - cz) / cz)).item()
+    mse_loss      = nn.MSELoss(reduction='sum')
+    mse           = mse_loss(prediction, cz)
+    percent_error = th.sum(100 * th.abs((prediction - cz) / cz))
     
     # Returns Total Loss, Total % Error, & Number of Examples in Batch
-    return loss, percent_error, len(images)
+    return mse, percent_error, len(images)
 
 
 ################################################################################
 
-def fit(epochs, model, loss_func, opt, patience, train_dl, valid_dl,
+def fit(epochs, model, opt, patience, train_dl, valid_dl,
         device='cpu', model_directory='checkpoints'):
 
     # Tracks Model Metrics
@@ -511,7 +512,7 @@ def fit(epochs, model, loss_func, opt, patience, train_dl, valid_dl,
     
     # Early Stopping Metrics
     last_val_model = None
-    min_val_loss   = 10**10 # Initialize to Large Number
+    min_val_err   = 10**10 # Initialize to Large Number
     no_improvement = 0
     
     
@@ -524,9 +525,9 @@ def fit(epochs, model, loss_func, opt, patience, train_dl, valid_dl,
     for epoch in range(epochs):
         
         # Training Metrics
-        training_loss   = 0.
-        training_images = 0
-        training_error  = 0.
+        training_mse = 0.
+        training_img = 0
+        training_err = 0.
         
         # Switches Model to Training Mode
         model.train()
@@ -538,23 +539,24 @@ def fit(epochs, model, loss_func, opt, patience, train_dl, valid_dl,
             opt.zero_grad()
         
             # Compute Batch Loss, Error, & Number of Training Examples
-            loss, batch_err, batch_ex = compute_running_loss(model, loss_func, batched_data, device)
+            batch_mse, batch_err, batch_size = compute_running_loss(model, batched_data, device)
             
             # Compute Gradients
-            loss.backward()
+            batch_err.backward()
+            
             # Update Model
             opt.step()
             
             # Tracks Cumulative Training Loss & Percent Error Per Epoch
-            training_loss   += loss.item()
-            training_error  += batch_err
-            training_images += batch_ex
+            training_mse += batch_mse.item()
+            training_err += batch_err.item()
+            training_img += batch_size
             
 
         # Validation Metrics
-        validation_loss   = 0.
-        validation_images = 0
-        validation_error  = 0.
+        validation_mse = 0.
+        validation_img = 0
+        validation_err = 0.
 
         # Switches Model to Evaluation Mode
         model.eval()
@@ -566,27 +568,27 @@ def fit(epochs, model, loss_func, opt, patience, train_dl, valid_dl,
             for batched_data in valid_dl:
             
                 # Compute Batch Loss, Error, & Number of Training Examples
-                batch_loss, batch_err, batch_ex = compute_running_loss(model, loss_func, batched_data, device)
+                batch_mse, batch_err, batch_size = compute_running_loss(model, batched_data, device)
             
                 # Tracks Cumulative Validation Loss & Percent Error Per Epoch
-                validation_loss   += batch_loss.item()
-                validation_error  += batch_err
-                validation_images += batch_ex
+                validation_mse += batch_mse.item()
+                validation_err += batch_err.item()
+                validation_img += batch_size
                 
     
         # Compute Training & Evaluation Losses Per Epoch
-        train_loss_per_epoch = training_loss   / training_images
-        valid_loss_per_epoch = validation_loss / validation_images
-        training_error      /= training_images
-        validation_error    /= validation_images
-        metrics_dict[epoch]  = [train_loss_per_epoch, valid_loss_per_epoch, training_error, validation_error]
+        train_mse_per_epoch = training_mse   / training_img
+        train_err_per_epoch = training_err   / training_img
+        valid_mse_per_epoch = validation_mse / validation_img
+        valid_err_per_epoch = validation_err / validation_img
+        metrics_dict[epoch] = [train_mse_per_epoch, valid_mse_per_epoch, train_err_per_epoch, valid_err_per_epoch]
         
         
         # Early Stopping
-        if valid_loss_per_epoch < min_val_loss:
+        if valid_err_per_epoch < min_val_err:
             
             # Resets Counter & Minimum Validation Loss Observed
-            min_val_loss   = valid_loss_per_epoch
+            min_val_err   = valid_err_per_epoch
             no_improvement = 0
             try:
                 os.remove(last_val_model)
@@ -602,12 +604,13 @@ def fit(epochs, model, loss_func, opt, patience, train_dl, valid_dl,
             torch.save({ 'epoch':                epoch,
                          'model_state_dict':     model.state_dict(),
                          'optimizer_state_dict': opt.state_dict(),
-                         'loss':                 loss
+                         'mse_loss':             valid_mse_per_epoch,
+                         'perc_err':             valid_err_per_epoch
                        }, MODEL_PATH)
         else:
             no_improvement += 1
         
-        print(f"{epoch} \t {train_loss_per_epoch:>10.5f} \t {valid_loss_per_epoch:>10.5f} \t {training_error:>9.3f}% \t {validation_error:>9.3f}%" )
+        print(f"{epoch} \t {train_mse_per_epoch:>10.5f} \t {valid_mse_per_epoch:>10.5f} \t {train_err_per_epoch:>9.3f}% \t {valid_err_per_epoch:>9.3f}%" )
 
         # Stops Training if Number of Epochs without Validation Loss Improvement > Patience
         if no_improvement >= patience:
@@ -660,9 +663,21 @@ def plot_true_vs_predicted(MODEL, train_dataloader, valid_dataloader,
                            plot_fname="true_vs_pred.pdf", verbose=True,
                            save_predictions=True):
 
+    # Generate Predictions
     train_true, train_pred = generate_predictions(MODEL, train_dataloader, verbose=verbose)
     valid_true, valid_pred = generate_predictions(MODEL, valid_dataloader, verbose=verbose)
     
+    # Save Predictions
+    if save_predictions:
+        directory     = os.path.dirname(plot_fname)
+        train_results = os.path.join(directory,  "train_results.csv")
+        valid_results = os.path.join(directory,  "valid_results.csv")
+        train_rows    = zip(train_true, train_pred) #zip(z_to_cz(train_true), z_to_cz(train_pred))
+        valid_rows    = zip(valid_true, valid_pred) #zip(z_to_cz(valid_true), z_to_cz(valid_pred))
+        header        = ("true_cz", "predicted_cz")
+        write_to_file(train_results, train_rows, header)
+        write_to_file(valid_results, valid_rows, header)
+
     # Create Figure
     plt.figure(figsize=(10,10))
     
@@ -689,20 +704,6 @@ def plot_true_vs_predicted(MODEL, train_dataloader, valid_dataloader,
     
     plt.savefig(plot_fname, bbox_inches='tight')
 
-    if save_predictions:
-    
-        def z_to_cz(z_list):
-            return list(SPEED_OF_LIGHT * np.array(z_list))
-        
-        directory     = os.path.dirname(plot_fname)
-        train_results = os.path.join(directory,  "train_results.csv")
-        valid_results = os.path.join(directory,  "valid_results.csv")
-        train_rows    = zip(train_true, train_pred) #zip(z_to_cz(train_true), z_to_cz(train_pred))
-        valid_rows    = zip(valid_true, valid_pred) #zip(z_to_cz(valid_true), z_to_cz(valid_pred))
-        header        = ("true_cz", "predicted_cz")
-        write_to_file(train_results, train_rows, header)
-        write_to_file(valid_results, valid_rows, header)
-
 
 ################################################################################
 
@@ -712,6 +713,16 @@ def plot_learning_curve(metrics_dict, plot_fname='learning_curve.pdf',
     # Load Metrics
     epochs = list(metrics_dict.keys())
     training_loss, validation_loss, training_error, validation_error = list(zip(*metrics_dict.values()))
+
+    # Write Metrics to CSV File
+    if save_metrics:
+        csv_file  = plot_fname.replace('pdf', 'csv')
+        data_rows = zip( epochs, training_loss,  validation_loss,
+                                 training_error, validation_error )
+        header    = ("epoch", "training_loss",  "validation_loss",
+                              "training_error", "validation_error")
+        write_to_file(csv_file, data_rows, header)
+
 
     # Create Figure
     fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(11, 5))
@@ -743,15 +754,6 @@ def plot_learning_curve(metrics_dict, plot_fname='learning_curve.pdf',
     
     # Save Figure
     plt.savefig(plot_fname, bbox_inches='tight')
-
-    # Write Metrics to CSV File
-    if save_metrics:
-        csv_file  = plot_fname.replace('pdf', 'csv')
-        data_rows = zip( epochs, training_loss,  validation_loss,
-                                 training_error, validation_error )
-        header    = ("epoch", "training_loss",  "validation_loss",
-                              "training_error", "validation_error")
-        write_to_file(csv_file, data_rows, header)
 
 
 ################################################################################
@@ -826,11 +828,13 @@ def pipeline(PROJECT, train_model=True, load_checkpoint=True):
     EPOCHS          = int(ITERATIONS * AUGMENT_FACTOR * DATASET_SIZE/BATCH_SIZE)
     LEARNING_RATE   = 10**-4
     DECAY           = 0.25
-    LOSS_FUNC       = nn.MSELoss(reduction='sum')
     OPTIMIZER       = optim.Adam( MODEL.parameters(), lr=LEARNING_RATE,
                                  betas=(0.9, 0.999), eps=1e-08,
                                  weight_decay=DECAY, amsgrad=False )
     PATIENCE        = 15
+    
+    # Loss Function is defined in compute_running_loss() method. 
+    # LOSS_FUNC     = nn.MSELoss(reduction='sum')
     
     # USES GPU IF AVAILABLE
     MODEL.to(device)
@@ -862,11 +866,7 @@ def pipeline(PROJECT, train_model=True, load_checkpoint=True):
         LATEST_CHECKPOINT = max(g.glob(os.path.join(MODEL_DIRECTORY,'*')))
         checkpoint_dict   = th.load(LATEST_CHECKPOINT, map_location=map_location)
 
-        print(checkpoint_dict.keys())
-        print([type(val) for key,val in checkpoint_dict.items()])
-        
         EPOCHS    = checkpoint_dict['epoch']
-        LOSS      = checkpoint_dict['loss'].item() 
         MODEL.load_state_dict(checkpoint_dict['model_state_dict'])
         OPTIMIZER.load_state_dict(checkpoint_dict['optimizer_state_dict'])
 
@@ -876,7 +876,7 @@ def pipeline(PROJECT, train_model=True, load_checkpoint=True):
 
         # TRAIN & EVALUATION
         MODEL.train()
-        metrics_dict = fit(EPOCHS, MODEL, LOSS_FUNC, OPTIMIZER, PATIENCE,
+        metrics_dict = fit(EPOCHS, MODEL, OPTIMIZER, PATIENCE,
                            train_dataloader, valid_dataloader,
                            device, MODEL_DIRECTORY)
         plot_learning_curve(metrics_dict, plot_fname=LEARNING_CURVE_FILE)
@@ -902,10 +902,10 @@ if __name__ == "__main__":
     MINI   = "/Users/jkadowaki/Documents/github/UDG_RedshiftEstimator"
 
     # Train & Predict
-    # pipeline(PROJECT=HPC, train_model=True, load_checkpoint=False)
+    pipeline(PROJECT=MBP, train_model=True, load_checkpoint=False)
 
     # Predict only from pre-trained model
-    pipeline(PROJECT=MBP, train_model=False, load_checkpoint=True)
+    # pipeline(PROJECT=MBP, train_model=False, load_checkpoint=True)
 
 
 ################################################################################
