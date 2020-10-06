@@ -87,7 +87,7 @@ class SMUDGesDataset(Dataset):
     """
     
     def __init__(self, csv_file, root_dir, transform=None,
-                       zoom=15, image_type='dr8_data'):
+                       zoom=15, image_type='m'): #'dr8_data'):
         """
         Reads csv_file
 
@@ -359,7 +359,7 @@ def display_batch(dataloader, batch_size=16):
 #                           REDSHIFT ESTIMATION MODEL                          #
 #                                                                              #
 ################################################################################
-"""
+
 class SMUDGes_CNN(nn.Module):
     
     # Model needs updating. See link below:
@@ -425,7 +425,7 @@ class SMUDGes_CNN(nn.Module):
         
         return image.view(-1,1,1)
     
-"""
+
 ################################################################################
 
 def build_model(arch, num_classes=1, hidden_units=1024):
@@ -588,7 +588,7 @@ def fit(epochs, model, opt, patience, train_dl, valid_dl,
         if valid_err_per_epoch < min_val_err:
             
             # Resets Counter & Minimum Validation Loss Observed
-            min_val_err   = valid_err_per_epoch
+            min_val_err    = valid_err_per_epoch
             no_improvement = 0
             try:
                 os.remove(last_val_model)
@@ -630,7 +630,7 @@ def fit(epochs, model, opt, patience, train_dl, valid_dl,
 #                                                                              #
 ################################################################################
 
-def generate_predictions(MODEL, dataloader, verbose=True, num_augmentations=10):
+def generate_predictions(MODEL, device, dataloader, verbose=True, num_augmentations=10):
     
     if verbose:
         print("True\t Predicted")
@@ -641,9 +641,9 @@ def generate_predictions(MODEL, dataloader, verbose=True, num_augmentations=10):
     for idx in range(num_augmentations):
         
         for batch in dataloader:
-            image    = batch['image']
+            image    = batch['image'].to(device)
             cz       = batch['cz']
-            estimate = MODEL(image)
+            estimate = MODEL(image).to('cpu')
             
             for item in zip(cz, estimate):
                 #print(true)
@@ -659,13 +659,13 @@ def generate_predictions(MODEL, dataloader, verbose=True, num_augmentations=10):
 
 ################################################################################
 
-def plot_true_vs_predicted(MODEL, train_dataloader, valid_dataloader,
+def plot_true_vs_predicted(MODEL, device, train_dataloader, valid_dataloader,
                            plot_fname="true_vs_pred.pdf", verbose=True,
                            save_predictions=True):
 
     # Generate Predictions
-    train_true, train_pred = generate_predictions(MODEL, train_dataloader, verbose=verbose)
-    valid_true, valid_pred = generate_predictions(MODEL, valid_dataloader, verbose=verbose)
+    train_true, train_pred = generate_predictions(MODEL, device, train_dataloader, verbose=verbose)
+    valid_true, valid_pred = generate_predictions(MODEL, device,  valid_dataloader, verbose=verbose)
     
     # Save Predictions
     if save_predictions:
@@ -678,32 +678,36 @@ def plot_true_vs_predicted(MODEL, train_dataloader, valid_dataloader,
         write_to_file(train_results, train_rows, header)
         write_to_file(valid_results, valid_rows, header)
 
-    # Create Figure
-    plt.figure(figsize=(10,10))
+    try:
+        # Create Figure
+        plt.figure(figsize=(10,10))
     
-    # Plot Training & Validation Results
-    plt.scatter(train_true, train_pred, c='b', marker='.', s=15, label="Training")
-    plt.scatter(valid_true, valid_pred, c='r', marker='o', s=50, label="Validation")
+        # Plot Training & Validation Results
+        plt.scatter(train_true, train_pred, c='b', marker='.', s=15, label="Training")
+        plt.scatter(valid_true, valid_pred, c='r', marker='o', s=50, label="Validation")
     
-    # Adjust Plot Bounds
-    all_values = train_true + train_pred + valid_true + valid_pred
-    minimum   = min(all_values)
-    maximum   = max(all_values)
-    min_bound = min(0.9 * minimum, 1.1 * minimum)
-    max_bound = max(0.9 * maximum, 1.1 * maximum)
-    plt.xlim(min_bound, max_bound)
-    plt.ylim(min_bound, max_bound)
+        # Adjust Plot Bounds
+        all_values = train_true + train_pred + valid_true + valid_pred
+        minimum   = min(all_values)
+        maximum   = max(all_values)
+        min_bound = min(0.9 * minimum, 1.1 * minimum)
+        max_bound = max(0.9 * maximum, 1.1 * maximum)
+        plt.xlim(min_bound, max_bound)
+        plt.ylim(min_bound, max_bound)
     
-    # Plot 1:1 Line w/in Plot Bounds
-    plt.plot([min_bound,max_bound], [min_bound,max_bound], c='g', linestyle='-')
+        # Plot 1:1 Line w/in Plot Bounds
+        plt.plot([min_bound,max_bound], [min_bound,max_bound], c='g', linestyle='-')
     
-    # Plot Formatting
-    plt.xlabel(r"True cz (km/s)")
-    plt.ylabel(r"Predicted cz (km/s)")
-    plt.legend()
+        # Plot Formatting
+        plt.xlabel(r"True cz (km/s)")
+        plt.ylabel(r"Predicted cz (km/s)")
+        plt.legend()
     
-    plt.savefig(plot_fname, bbox_inches='tight')
-
+        plt.savefig(plot_fname, bbox_inches='tight')
+    
+    except:
+        print(f"Could not generate {plot_fname}.")
+        pass
 
 ################################################################################
 
@@ -723,38 +727,40 @@ def plot_learning_curve(metrics_dict, plot_fname='learning_curve.pdf',
                               "training_error", "validation_error")
         write_to_file(csv_file, data_rows, header)
 
+    try:
+        # Create Figure
+        fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(11, 5))
 
-    # Create Figure
-    fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(11, 5))
-
-    # Plot Learning Curves
-    axes[0].plot(epochs, training_loss,    c='b', label=r"Training")
-    axes[0].plot(epochs, validation_loss,  c='r', label=r"Validation")
-    axes[1].plot(epochs, training_error,   c='b', label=r"Training")
-    axes[1].plot(epochs, validation_error, c='r', label=r"Validation")
+        # Plot Learning Curves
+        axes[0].plot(epochs, training_loss,    c='b', label=r"Training")
+        axes[0].plot(epochs, validation_loss,  c='r', label=r"Validation")
+        axes[1].plot(epochs, training_error,   c='b', label=r"Training")
+        axes[1].plot(epochs, validation_error, c='r', label=r"Validation")
     
-    # Plot Early Stopping Epoch
-    vl_epoch   = [e for e,vl in zip(epochs, validation_loss)  if vl==min(validation_loss)][0]
-    ve_epoch   = [e for e,ve in zip(epochs, validation_error) if ve==min(validation_error)][0]
-    ymin, ymax = axes[0].get_ylim()
-    axes[0].plot([vl_epoch, vl_epoch], [ymin, ymax], c='g', linestyle='--', label=r'Val Loss  Epoch')
-    axes[0].plot([ve_epoch, ve_epoch], [ymin, ymax], c='y', linestyle='-.', label=r'Val Error Epoch')
-    ymin, ymax = axes[1].get_ylim()
-    axes[1].plot([vl_epoch, vl_epoch], [ymin, ymax], c='g', linestyle='--', label=r'Val Loss  Epoch')
-    axes[1].plot([ve_epoch, ve_epoch], [ymin, ymax], c='y', linestyle='-.', label=r'Val Error Epoch')
+        # Plot Early Stopping Epoch
+        vl_epoch   = [e for e,vl in zip(epochs, validation_loss)  if vl==min(validation_loss)][0]
+        ve_epoch   = [e for e,ve in zip(epochs, validation_error) if ve==min(validation_error)][0]
+        ymin, ymax = axes[0].get_ylim()
+        axes[0].plot([vl_epoch, vl_epoch], [ymin, ymax], c='g', linestyle='--', label=r'Val Loss  Epoch')
+        axes[0].plot([ve_epoch, ve_epoch], [ymin, ymax], c='y', linestyle='-.', label=r'Val Error Epoch')
+        ymin, ymax = axes[1].get_ylim()
+        axes[1].plot([vl_epoch, vl_epoch], [ymin, ymax], c='g', linestyle='--', label=r'Val Loss  Epoch')
+        axes[1].plot([ve_epoch, ve_epoch], [ymin, ymax], c='y', linestyle='-.', label=r'Val Error Epoch')
 
-
-    # Plot Formatting
-    axes[0].set_xlabel(r"Epochs")
-    axes[0].set_ylabel(r"MSE Loss")
-    axes[1].set_xlabel(r"Epochs")
-    axes[1].set_ylabel(r"Percent Error (\%)")
-    axes[0].legend()
-    axes[1].legend()
+        # Plot Formatting
+        axes[0].set_xlabel(r"Epochs")
+        axes[0].set_ylabel(r"MSE Loss")
+        axes[1].set_xlabel(r"Epochs")
+        axes[1].set_ylabel(r"Percent Error (\%)")
+        axes[0].legend()
+        axes[1].legend()
     
-    # Save Figure
-    plt.savefig(plot_fname, bbox_inches='tight')
+        # Save Figure
+        plt.savefig(plot_fname, bbox_inches='tight')
 
+    except:
+        print(f"Could not generate plot {plot_fname}.")
+        pass
 
 ################################################################################
 
@@ -814,7 +820,7 @@ def pipeline(PROJECT, train_model=True, load_checkpoint=True):
 
     # DATA PARAMETERS
     DATASET_SIZE      = 68
-    BATCH_SIZE        = 16
+    BATCH_SIZE        = 4
     TRAINING_FRACTION = 0.8
     NUM_NODES         = 0 if th.cuda.is_available() else 94 if PROJECT==HPC else 4
 
@@ -822,16 +828,16 @@ def pipeline(PROJECT, train_model=True, load_checkpoint=True):
 
     # MODEL PARAMETERS
     MODEL_DIRECTORY = os.path.join(PROJECT, "checkpoints")
-    MODEL           = build_model("resnet50", hidden_units=64) # SMUDGes_CNN()
+    MODEL           = SMUDGes_CNN() #build_model("resnet50", hidden_units=64)
     AUGMENT_FACTOR  = 2 * 4 * 25
     ITERATIONS      = 2
-    EPOCHS          = int(ITERATIONS * AUGMENT_FACTOR * DATASET_SIZE/BATCH_SIZE)
+    EPOCHS          = 5000  # int(ITERATIONS * AUGMENT_FACTOR * DATASET_SIZE/BATCH_SIZE)
     LEARNING_RATE   = 10**-4
     DECAY           = 0.25
     OPTIMIZER       = optim.Adam( MODEL.parameters(), lr=LEARNING_RATE,
                                  betas=(0.9, 0.999), eps=1e-08,
                                  weight_decay=DECAY, amsgrad=False )
-    PATIENCE        = 15
+    PATIENCE        = 50
     
     # Loss Function is defined in compute_running_loss() method. 
     # LOSS_FUNC     = nn.MSELoss(reduction='sum')
@@ -863,7 +869,7 @@ def pipeline(PROJECT, train_model=True, load_checkpoint=True):
     if load_checkpoint:
         map_location = 'cpu' if not th.cuda.is_available() else lambda storage, loc: storage.cuda() 
                 
-        LATEST_CHECKPOINT = max(g.glob(os.path.join(MODEL_DIRECTORY,'*')))
+        LATEST_CHECKPOINT = max(g.glob(os.path.join(MODEL_DIRECTORY,'*.pt')))
         checkpoint_dict   = th.load(LATEST_CHECKPOINT, map_location=map_location)
 
         EPOCHS    = checkpoint_dict['epoch']
@@ -885,7 +891,7 @@ def pipeline(PROJECT, train_model=True, load_checkpoint=True):
 
     # GENERATE PREDICTIONS
     MODEL.eval()
-    plot_true_vs_predicted(MODEL, train_dataloader, valid_dataloader,
+    plot_true_vs_predicted(MODEL, device, train_dataloader, valid_dataloader,
                            plot_fname=RESULTS_FILE, verbose=True)
 
 
@@ -902,7 +908,7 @@ if __name__ == "__main__":
     MINI   = "/Users/jkadowaki/Documents/github/UDG_RedshiftEstimator"
 
     # Train & Predict
-    pipeline(PROJECT=MBP, train_model=True, load_checkpoint=False)
+    pipeline(PROJECT=HPC, train_model=True, load_checkpoint=False)
 
     # Predict only from pre-trained model
     # pipeline(PROJECT=MBP, train_model=False, load_checkpoint=True)
